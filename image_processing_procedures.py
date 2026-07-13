@@ -70,7 +70,7 @@ def img_to_file(img, filename, output_dir=None):
     Args:
         img (np.ndarray): Greyscale image as a uint8 array
         filename (str): Desired name of file, including extension
-        output_dir (str | Path): Directory to save the file. Defaults to 'Output Folder' file.
+        output_dir (str | Path): Directory to save the file. Defaults to 'outputs' file.
     """
 
     filename = Path(filename)
@@ -80,7 +80,7 @@ def img_to_file(img, filename, output_dir=None):
         output_path = filename
     else:
         if output_dir is None:
-            output_dir = Path(__file__).parent / "Output Files"
+            output_dir = Path(__file__).parent / "outputs"
         output_path = Path(output_dir) / filename
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -386,7 +386,7 @@ class SoilingAnalysis:
         visualiser_flag (bool): If True, displays overlay of results.
         image_dir (str | Path): Directory to search if only a filename is given. Defaults to
             'images'.
-        output_dir (str | Path): Directory to output to. Defaults to 'Output Files'.
+        output_dir (str | Path): Directory to output to. Defaults to 'outputs'.
     """
 
     def __init__(
@@ -397,7 +397,7 @@ class SoilingAnalysis:
         visualiser_flag,
         gamma=0.9,
         image_dir="images",
-        output_dir="Output Files",
+        output_dir="outputs",
     ):
         self.img_name = img_name
         self.background = background
