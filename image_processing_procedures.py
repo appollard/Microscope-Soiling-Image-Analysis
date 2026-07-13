@@ -22,13 +22,14 @@ from skimage.segmentation import watershed
 ###################################################################################################
 
 
-def file_to_img(file, background_colour, img_dir="images"):
+def file_to_img(file, background_colour, img_dir="microscope_images"):
     """Convert a .bmp or .jpg file into a uint8 greyscale image.
 
     Args:
         file (str | Path): File name or full path to the image.
         background_colour: Either "black" or "white".
-        img_dir (str): Subdirectory used if only a file name is given. Defaults to "images".
+        img_dir (str): Subdirectory used if only a file name is given. Defaults to
+            "microscope_images".
 
     Returns:
         grey_img (np.ndarray): Greyscale image as a uint8 array with white background and
@@ -385,7 +386,7 @@ class SoilingAnalysis:
         gamma (float): Scaling factor applied to DoG result (pixel^gamma). Defaults to 0.9
         visualiser_flag (bool): If True, displays overlay of results.
         image_dir (str | Path): Directory to search if only a filename is given. Defaults to
-            'images'.
+            'microscope_images'.
         output_dir (str | Path): Directory to output to. Defaults to 'outputs'.
     """
 
@@ -396,7 +397,7 @@ class SoilingAnalysis:
         um_per_pixel,
         visualiser_flag,
         gamma=0.9,
-        image_dir="images",
+        image_dir="microscope_images",
         output_dir="outputs",
     ):
         self.img_name = img_name
