@@ -1,6 +1,7 @@
 *__pycache__*
 microscope_images/*
 outputs/*
+procedure_documentation/*
 *.pyc
 .venv/
 dist/
