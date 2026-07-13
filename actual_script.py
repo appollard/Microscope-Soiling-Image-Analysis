@@ -3,10 +3,10 @@ from image_processing_procedures import SoilingAnalysis
 
 # Run Procedure A
 SoilingAnalysis(
-    "01.bmp", "black", 1 / 3.156, True, 0.9, "images", "Output Files"
-).procedure_A()
+    "09.jpg", "white", 1 / 3.156, True, 0.9, "microscope_images", "outputs"
+).procedure_C()
 
 # Run Procedure B
 SoilingAnalysis(
-    "08.bmp", "black", 1 / 3.156, True, 0.9, "images", "Output Files"
+    "09.bmp", "black", 1 / 3.156, True, 0.9, "microscope_images", "outputs"
 ).procedure_B(15, 50)

@@ -158,6 +158,8 @@ def apply_dog_triangle(img, gamma, s1=1, s2=2):
 ###################################################################################################
 # SEGMENTED MAXIMA SEARCH WITH FIXED PROMINENCE FUNCTIONS
 ###################################################################################################
+# WIP
+###################################################################################################
 
 
 from skimage.morphology import ball, white_tophat, disk
@@ -185,6 +187,20 @@ def apply_fixed_prominence_maxima(img, prominence=15, rolling_radius=50):
 
     # 1 everywhere except boundaries
     return boundaries ^ 1
+
+
+###################################################################################################
+# ILLUMINATION NORMALISATION
+###################################################################################################
+# WIP
+###################################################################################################
+
+
+from skimage.exposure import equalize_adapthist
+
+
+def correct_illumination(img):
+    # Find something that uses retinex online
 
 
 ###################################################################################################
@@ -426,7 +442,6 @@ class SoilingAnalysis:
         procedure_A_mask = otsu_mask | dog_mask
 
         # Save masks
-
         img_to_file(255 - 255 * otsu_mask, "Otsu Mask.png", self.output_dir)
         img_to_file(255 - 255 * dog_mask, "DoG Mask.png", self.output_dir)
         img_to_file(
@@ -466,7 +481,6 @@ class SoilingAnalysis:
         procedure_B_mask = (otsu_mask | dog_mask) & fixed_prominence_mask
 
         # Save masks
-
         img_to_file(255 - 255 * otsu_mask, "Otsu Mask.png", self.output_dir)
         img_to_file(255 - 255 * dog_mask, "DoG Mask.png", self.output_dir)
         img_to_file(
@@ -483,3 +497,29 @@ class SoilingAnalysis:
         # Visualise the result
         if self.visualiser_flag:
             show_overlay(self.microscope_img, procedure_B_mask, particle_dicts)
+
+    def procedure_C(self):
+
+        # Adjust luminance
+        corrected_image = correct_illumination(self.microscope_img)
+
+        # Apply masks
+        otsu_mask = apply_otsu(corrected_image)
+        dog_mask = apply_dog_triangle(corrected_image, self.gamma)
+        procedure_C_mask = otsu_mask | dog_mask
+
+        # Save masks/corrected image
+        img_to_file(corrected_image, "Corrected Image.png", self.output_dir)
+        img_to_file(255 - 255 * otsu_mask, "Otsu Mask.png", self.output_dir)
+        img_to_file(255 - 255 * dog_mask, "DoG Mask.png", self.output_dir)
+        img_to_file(
+            255 - 255 * procedure_C_mask, "Procedure C Mask.png", self.output_dir
+        )
+
+        # Analyse particle count
+        filled_mask = fill_outlines(procedure_C_mask)
+        particle_dicts = identify_particles(filled_mask, self.um_per_pixel)
+
+        # Visualise the result
+        if self.visualiser_flag:
+            show_overlay(self.microscope_img, procedure_C_mask, particle_dicts)
