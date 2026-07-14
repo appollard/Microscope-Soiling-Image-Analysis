@@ -2,6 +2,7 @@
 import numpy as np
 import os
 import cv2
+from cv2_rolling_ball import subtract_background_rolling_ball
 from pathlib import Path
 import matplotlib.pyplot as plt
 from matplotlib.widgets import Slider
@@ -93,6 +94,37 @@ def img_to_file(img, filename, output_dir=None):
         img = np.clip(img, 0, 255).astype(np.uint8)
     cv2.imwrite(output_path, img)
     return
+
+
+###################################################################################################
+# PRE-PROCESSING FUNCTIONS
+###################################################################################################
+# WIP
+###################################################################################################
+
+
+def subtract_noise_rolling_ball(img, img_background, radius=50):
+    """Remove noise using a rolling ball, as in ImageJ.
+
+    Args:
+        img (np.ndarray): Greyscale uint8 array microscope image.
+        img_background (str): Either 'black' or 'white'.
+        radius (int): Radius of the rolling ball- should be larger than the largest particle.
+            Defaults to 50.
+
+    Returns:
+        denoised (np.ndarray): Greyscale uint8 array microscope image with noise removed.
+
+    """
+
+    denoised, _ = subtract_background_rolling_ball(
+        img.copy(),
+        radius,
+        light_background=img_background == "white",  # True if img_background is white
+        use_paraboloid=False,
+        do_presmooth=False,
+    )
+    return denoised
 
 
 ###################################################################################################
@@ -201,6 +233,8 @@ from skimage.exposure import equalize_adapthist
 
 def correct_illumination(img):
     # Find something that uses retinex online
+
+    return img
 
 
 ###################################################################################################
@@ -426,7 +460,7 @@ class SoilingAnalysis:
         # Read image with white soiling, black background
         self.microscope_img = file_to_img(img_name, background, self.image_dir)
 
-    def procedure_A(self):
+    def procedure_A(self, rolling_radius=50):
         """Run Procedure A: apply Otsu and DoG masks, analyse particles.
 
         Saves:
@@ -436,9 +470,18 @@ class SoilingAnalysis:
             Matplotlib overlay figure if visualiser_flag is True.
         """
 
+        ###################################################################################################
+        # WIP
+        ###################################################################################################
+        # denoised_img = subtract_noise_rolling_ball(
+        #    self.microscope_img, self.background, rolling_radius
+        # )
+        denoised_img = self.microscope_img
+        ###################################################################################################
+
         # Apply masks
-        otsu_mask = apply_otsu(self.microscope_img)
-        dog_mask = apply_dog_triangle(self.microscope_img, self.gamma)
+        otsu_mask = apply_otsu(denoised_img)
+        dog_mask = apply_dog_triangle(denoised_img, self.gamma)
         procedure_A_mask = otsu_mask | dog_mask
 
         # Save masks
@@ -471,11 +514,20 @@ class SoilingAnalysis:
             Matplotlib overlay figure if visualiser_flag is True.
         """
 
+        ###################################################################################################
+        # WIP
+        ###################################################################################################
+        #        denoised_img = subtract_noise_rolling_ball(
+        #            self.microscope_img, self.background, rolling_radius
+        #        )
+        denoised_img = self.microscope_img
+        ###################################################################################################
+
         # Apply masks
-        otsu_mask = apply_otsu(self.microscope_img)
-        dog_mask = apply_dog_triangle(self.microscope_img, self.gamma)
+        otsu_mask = apply_otsu(denoised_img)
+        dog_mask = apply_dog_triangle(denoised_img, self.gamma)
         fixed_prominence_mask = apply_fixed_prominence_maxima(
-            self.microscope_img, prominence, rolling_radius
+            denoised_img, prominence, rolling_radius
         )
 
         procedure_B_mask = (otsu_mask | dog_mask) & fixed_prominence_mask
@@ -500,8 +552,17 @@ class SoilingAnalysis:
 
     def procedure_C(self):
 
+        ###################################################################################################
+        # WIP
+        ###################################################################################################
+        #        denoised_img = subtract_noise_rolling_ball(
+        #            self.microscope_img, self.background, rolling_radius
+        #        )
+        denoised_img = self.microscope_img
+        ###################################################################################################
+
         # Adjust luminance
-        corrected_image = correct_illumination(self.microscope_img)
+        corrected_image = correct_illumination(denoised_img)
 
         # Apply masks
         otsu_mask = apply_otsu(corrected_image)
