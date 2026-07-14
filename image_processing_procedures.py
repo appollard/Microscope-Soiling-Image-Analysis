@@ -17,6 +17,8 @@ from skimage.measure import label, regionprops
 from skimage.morphology import flood_fill, extrema
 from skimage.feature import peak_local_max
 from skimage.segmentation import watershed, find_boundaries
+from skimage.exposure import equalize_adapthist
+from retinex import msrcr
 
 ###################################################################################################
 # SAVING FUNCTIONS
@@ -33,7 +35,7 @@ def file_to_img(file, background_colour, img_dir="microscope_images"):
             "microscope_images".
 
     Returns:
-        grey_img (np.ndarray): Greyscale image as a uint8 array with white background and
+        img (np.ndarray): Greyscale or coloured image as a uint8 array with white background and
             black soiling.
 
     Raises:
@@ -53,17 +55,15 @@ def file_to_img(file, background_colour, img_dir="microscope_images"):
 
     img = cv2.imread(str(img_path))
     if img.ndim == 3:
-        gray_img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    else:
-        gray_img = img
+        return img  # Bypass for coloured images
 
     if background_colour == "black":
-        gray_img = 255 - gray_img
+        img = 255 - img
     elif background_colour == "white":
         pass
     else:
         raise ValueError("Acceptable values are 'black' or white'. Case sensitive.")
-    return gray_img
+    return img
 
 
 def img_to_file(img, filename, output_dir=None):
@@ -130,6 +130,44 @@ def subtract_noise_rolling_ball(img, radius=50):
     denoised = denoised_padded[pad:-pad, pad:-pad]
 
     return denoised
+
+
+###################################################################################################
+# ILLUMINATION NORMALISATION
+###################################################################################################
+# WIP
+###################################################################################################
+
+
+# REPLACE WITH https://github.com/muggledy/retinex
+def correct_illumination(img_rgb, scale=240, scale_division=3, dynamic=2.12):
+    """
+
+    Args:
+        scale (int): Size of largest sigma. 240 in Procedure C documentation.
+        scale_division (int): Number of increments from 0 to [scale]. 3 in Procedure 3
+            documentation
+        dynamic (float): Anything outside of +-[]dynamic] standard deviations is clipped to 0 or
+            255. 2.12 in Procedure C documentation.
+    """
+
+    img_float = img_rgb.astype(np.float32) + 1.0
+
+    sigmas = [scale * (i + 1) / scale_division for i in range(scale_division)]
+
+    result = np.zeros_like(img_float)
+    for sigma in sigmas:
+        result += np.log(img_float) - np.log(gaussian_filter(img_float, sigma) + 1.0)
+    result /= scale_division
+
+    mean = result.mean()
+    std = result.std()
+    result = np.clip(result, mean - dynamic * std, mean + dynamic * std)
+    result -= result.min()
+    result /= result.max()
+    result = (result * 255).astype(np.uint8)
+
+    return cv2.cvtColor(result, cv2.COLOR_RGB2GRAY)
 
 
 ###################################################################################################
@@ -231,22 +269,6 @@ def apply_fixed_prominence_maxima(img, prominence=15):
     boundaries = find_boundaries(labels, mode="inner")
 
     return ~boundaries
-
-
-###################################################################################################
-# ILLUMINATION NORMALISATION
-###################################################################################################
-# WIP
-###################################################################################################
-
-
-from skimage.exposure import equalize_adapthist
-
-
-def correct_illumination(img):
-    # Find something that uses retinex online
-
-    return img
 
 
 ###################################################################################################
@@ -567,17 +589,17 @@ class SoilingAnalysis:
         if self.visualiser_flag:
             show_overlay(self.microscope_img, procedure_B_mask, particle_dicts)
 
-    def procedure_C(self):
+    def procedure_C(self, rolling_radius=50):
+
+        # Adjust luminance
+        corrected_image = correct_illumination(self.microscope_img)
 
         ###################################################################################################
         # WIP
         ###################################################################################################
-        # denoised_img = subtract_noise_rolling_ball(self.microscope_img, rolling_radius)
-        denoised_img = self.microscope_img
+        denoised_img = subtract_noise_rolling_ball(corrected_image, rolling_radius)
+        # denoised_img = self.microscope_img
         ###################################################################################################
-
-        # Adjust luminance
-        corrected_image = correct_illumination(denoised_img)
 
         # Apply masks
         otsu_mask = apply_otsu(corrected_image)
