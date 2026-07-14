@@ -122,7 +122,7 @@ def subtract_noise_rolling_ball(img, radius=50):
         radius,
         light_background=True,  # file_to_img always returns black soiling on white background
         use_paraboloid=False,
-        do_presmooth=False,
+        do_presmooth=True,
     )
     return denoised
 
@@ -194,31 +194,21 @@ def apply_dog_triangle(img, gamma, s1=1, s2=2):
 ###################################################################################################
 
 
-from skimage.morphology import ball, white_tophat, disk
+def apply_fixed_prominence_maxima(img, prominence=15):
 
-
-def apply_fixed_prominence_maxima(img, prominence=15, rolling_radius=50):
-
-    # True rolling ball equivalent — white top-hat transform
-    # This removes background while preserving bright particles
-    structuring_element = disk(rolling_radius)
-    img_subtracted = white_tophat(img, structuring_element)
-
-    # h-maxima finds every point prominence higher than surroundings
     from skimage.morphology import extrema
-
-    h_maxima = extrema.h_maxima(img_subtracted, h=prominence)
-
-    markers, _ = scipy_label(h_maxima)
-
-    labels = watershed(-img_subtracted, markers)
-
     from skimage.segmentation import find_boundaries
 
+    img_inv = (255 - img).astype(np.float32)  # dark particles become bright peaks
+
+    # h-maxima finds every point prominence higher than surroundings
+    h_maxima = extrema.h_maxima(img_inv, h=prominence)
+    markers, _ = scipy_label(h_maxima)
+    labels = watershed(-img_inv, markers)
     boundaries = find_boundaries(labels, mode="outer")
 
     # 1 everywhere except boundaries
-    return boundaries ^ 1
+    return boundaries ^ True
 
 
 ###################################################################################################
@@ -473,8 +463,8 @@ class SoilingAnalysis:
         ###################################################################################################
         # WIP
         ###################################################################################################
-        # denoised_img = subtract_noise_rolling_ball(self.microscope_img, rolling_radius)
-        denoised_img = self.microscope_img
+        denoised_img = subtract_noise_rolling_ball(self.microscope_img, rolling_radius)
+        # denoised_img = self.microscope_img
         ###################################################################################################
 
         # Apply masks
@@ -482,7 +472,9 @@ class SoilingAnalysis:
         dog_mask = apply_dog_triangle(denoised_img, self.gamma)
         procedure_A_mask = otsu_mask | dog_mask
 
-        # Save masks
+        # Save masks/corrected images
+        img_to_file(self.microscope_img, "Original Image.png", self.output_dir)
+        img_to_file(denoised_img, "Denoised Image.png", self.output_dir)
         img_to_file(255 - 255 * otsu_mask, "Otsu Mask.png", self.output_dir)
         img_to_file(255 - 255 * dog_mask, "DoG Mask.png", self.output_dir)
         img_to_file(
@@ -515,22 +507,20 @@ class SoilingAnalysis:
         ###################################################################################################
         # WIP
         ###################################################################################################
-        #        denoised_img = subtract_noise_rolling_ball(
-        #            self.microscope_img, self.background, rolling_radius
-        #        )
-        denoised_img = self.microscope_img
+        denoised_img = subtract_noise_rolling_ball(self.microscope_img, rolling_radius)
+        # denoised_img = self.microscope_img
         ###################################################################################################
 
         # Apply masks
         otsu_mask = apply_otsu(denoised_img)
         dog_mask = apply_dog_triangle(denoised_img, self.gamma)
-        fixed_prominence_mask = apply_fixed_prominence_maxima(
-            denoised_img, prominence, rolling_radius
-        )
+        fixed_prominence_mask = apply_fixed_prominence_maxima(denoised_img, prominence)
 
         procedure_B_mask = (otsu_mask | dog_mask) & fixed_prominence_mask
 
-        # Save masks
+        # Save masks/images
+        img_to_file(self.microscope_img, "Original Image.png", self.output_dir)
+        img_to_file(denoised_img, "Denoised Image.png", self.output_dir)
         img_to_file(255 - 255 * otsu_mask, "Otsu Mask.png", self.output_dir)
         img_to_file(255 - 255 * dog_mask, "DoG Mask.png", self.output_dir)
         img_to_file(
@@ -546,16 +536,14 @@ class SoilingAnalysis:
 
         # Visualise the result
         if self.visualiser_flag:
-            show_overlay(self.microscope_img, procedure_B_mask, particle_dicts)
+            show_overlay(denoised_img, procedure_B_mask, particle_dicts)
 
     def procedure_C(self):
 
         ###################################################################################################
         # WIP
         ###################################################################################################
-        #        denoised_img = subtract_noise_rolling_ball(
-        #            self.microscope_img, self.background, rolling_radius
-        #        )
+        # denoised_img = subtract_noise_rolling_ball(self.microscope_img, rolling_radius)
         denoised_img = self.microscope_img
         ###################################################################################################
 
@@ -567,7 +555,8 @@ class SoilingAnalysis:
         dog_mask = apply_dog_triangle(corrected_image, self.gamma)
         procedure_C_mask = otsu_mask | dog_mask
 
-        # Save masks/corrected image
+        # Save masks/images
+        img_to_file(self.microscope_img, "Original Image.png", self.output_dir)
         img_to_file(corrected_image, "Corrected Image.png", self.output_dir)
         img_to_file(255 - 255 * otsu_mask, "Otsu Mask.png", self.output_dir)
         img_to_file(255 - 255 * dog_mask, "DoG Mask.png", self.output_dir)
