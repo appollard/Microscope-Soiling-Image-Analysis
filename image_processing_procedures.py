@@ -12,11 +12,11 @@ from scipy.ndimage import (
     distance_transform_edt,
     label as scipy_label,
 )
-from skimage.filters import threshold_otsu, threshold_triangle
+from skimage.filters import threshold_otsu, threshold_triangle, gaussian
 from skimage.measure import label, regionprops
-from skimage.morphology import flood_fill
+from skimage.morphology import flood_fill, extrema
 from skimage.feature import peak_local_max
-from skimage.segmentation import watershed
+from skimage.segmentation import watershed, find_boundaries
 
 ###################################################################################################
 # SAVING FUNCTIONS
@@ -108,7 +108,6 @@ def subtract_noise_rolling_ball(img, radius=50):
 
     Args:
         img (np.ndarray): Greyscale uint8 array microscope image.
-        img_background (str): Either 'black' or 'white'.
         radius (int): Radius of the rolling ball- should be larger than the largest particle.
             Defaults to 50.
 
@@ -117,13 +116,19 @@ def subtract_noise_rolling_ball(img, radius=50):
 
     """
 
-    denoised, _ = subtract_background_rolling_ball(
-        img.copy(),
+    pad = int(radius)
+    img_padded = np.pad(img, pad, mode="reflect")
+
+    denoised_padded, _ = subtract_background_rolling_ball(
+        img_padded.copy(),
         radius,
         light_background=True,  # file_to_img always returns black soiling on white background
         use_paraboloid=False,
         do_presmooth=True,
     )
+
+    denoised = denoised_padded[pad:-pad, pad:-pad]
+
     return denoised
 
 
@@ -195,20 +200,37 @@ def apply_dog_triangle(img, gamma, s1=1, s2=2):
 
 
 def apply_fixed_prominence_maxima(img, prominence=15):
+    """Segment touching particles in a grayscale microscope image using EDT watershed.
 
-    from skimage.morphology import extrema
-    from skimage.segmentation import find_boundaries
+    Args:
+        img (np.ndarray): 2D uint8 grayscale microscope image where dark pixels
+            are particles and light pixels are background.
+        prominence (int): Minimum height by which a distance transform peak must
+            exceed its surroundings to seed a separate watershed region. Roughly
+            corresponds to minimum particle radius in pixels. Default 15.
 
-    img_inv = (255 - img).astype(np.float32)  # dark particles become bright peaks
+    Returns:
+        np.ndarray: 2D boolean mask, True everywhere except on inner boundaries
+            between watershed regions. AND-ing with a particle mask cuts
+            agglomerated blobs at their boundary lines.
+    """
 
-    # h-maxima finds every point prominence higher than surroundings
-    h_maxima = extrema.h_maxima(img_inv, h=prominence)
-    markers, _ = scipy_label(h_maxima)
-    labels = watershed(-img_inv, markers)
-    boundaries = find_boundaries(labels, mode="outer")
+    img_inv = 255 - img
 
-    # 1 everywhere except boundaries
-    return boundaries ^ True
+    rough_fg = img < threshold_otsu(img)
+
+    # Distance transform: peaks at particle centres, not intensity features
+    dist = distance_transform_edt(rough_fg)
+
+    # h-maxima on distance map suppresses minor peaks within one particle
+    h_max = extrema.h_maxima(dist, h=prominence)
+    h_max &= rough_fg
+
+    markers, _ = scipy_label(h_max)
+    labels = watershed(-dist, markers, mask=rough_fg)
+    boundaries = find_boundaries(labels, mode="inner")
+
+    return ~boundaries
 
 
 ###################################################################################################
@@ -474,7 +496,7 @@ class SoilingAnalysis:
 
         # Save masks/corrected images
         img_to_file(self.microscope_img, "Original Image.png", self.output_dir)
-        img_to_file(denoised_img, "Denoised Image.png", self.output_dir)
+        img_to_file(denoised_img, "Corrected Image.png", self.output_dir)
         img_to_file(255 - 255 * otsu_mask, "Otsu Mask.png", self.output_dir)
         img_to_file(255 - 255 * dog_mask, "DoG Mask.png", self.output_dir)
         img_to_file(
@@ -520,7 +542,7 @@ class SoilingAnalysis:
 
         # Save masks/images
         img_to_file(self.microscope_img, "Original Image.png", self.output_dir)
-        img_to_file(denoised_img, "Denoised Image.png", self.output_dir)
+        img_to_file(denoised_img, "Corrected Image.png", self.output_dir)
         img_to_file(255 - 255 * otsu_mask, "Otsu Mask.png", self.output_dir)
         img_to_file(255 - 255 * dog_mask, "DoG Mask.png", self.output_dir)
         img_to_file(
@@ -536,7 +558,7 @@ class SoilingAnalysis:
 
         # Visualise the result
         if self.visualiser_flag:
-            show_overlay(denoised_img, procedure_B_mask, particle_dicts)
+            show_overlay(self.microscope_img, procedure_B_mask, particle_dicts)
 
     def procedure_C(self):
 
