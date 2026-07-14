@@ -11,6 +11,7 @@ from scipy.ndimage import (
     binary_fill_holes,
     distance_transform_edt,
     label as scipy_label,
+    maximum,
 )
 from skimage.filters import threshold_otsu, threshold_triangle, gaussian
 from skimage.measure import label, regionprops
@@ -199,35 +200,12 @@ def apply_dog_triangle(img, gamma, s1=1, s2=2):
 ###################################################################################################
 
 
-def apply_fixed_prominence_maxima(img, prominence=15):
-    """Segment touching particles in a grayscale microscope image using EDT watershed.
+def apply_fixed_prominence_maxima(img, particle_mask, edt_prominence, prominence=15):
+    img_inv = (255 - img).astype(np.float32)
 
-    Args:
-        img (np.ndarray): 2D uint8 grayscale microscope image where dark pixels
-            are particles and light pixels are background.
-        prominence (int): Minimum height by which a distance transform peak must
-            exceed its surroundings to seed a separate watershed region. Roughly
-            corresponds to minimum particle radius in pixels. Default 15.
-
-    Returns:
-        np.ndarray: 2D boolean mask, True everywhere except on inner boundaries
-            between watershed regions. AND-ing with a particle mask cuts
-            agglomerated blobs at their boundary lines.
-    """
-
-    img_inv = 255 - img
-
-    rough_fg = img < threshold_otsu(img)
-
-    # Distance transform: peaks at particle centres, not intensity features
-    dist = distance_transform_edt(rough_fg)
-
-    # h-maxima on distance map suppresses minor peaks within one particle
-    h_max = extrema.h_maxima(dist, h=prominence)
-    h_max &= rough_fg
-
+    h_max = extrema.h_maxima(img_inv, h=prominence)  # mask before seeding
     markers, _ = scipy_label(h_max)
-    labels = watershed(-dist, markers, mask=rough_fg)
+    labels = watershed(-img_inv, markers)  # constrain to particles
     boundaries = find_boundaries(labels, mode="inner")
 
     return ~boundaries
@@ -238,9 +216,6 @@ def apply_fixed_prominence_maxima(img, prominence=15):
 ###################################################################################################
 # WIP
 ###################################################################################################
-
-
-from skimage.exposure import equalize_adapthist
 
 
 def correct_illumination(img):
@@ -357,16 +332,23 @@ def colourful_particle_map(particle_list, mask):
 
     """
 
-    # Define RGB colour options. Last one is tranparency
-    colours = np.uint8(
+    # Define RGBA colour options.
+    colours = np.array(
         [
-            (255, 0, 0, 255),
-            (0, 255, 0, 255),
-            (0, 0, 255, 255),
-            (255, 255, 0, 255),
-            (255, 0, 255, 255),
-            (0, 255, 255, 255),
-        ]
+            [255, 0, 0, 255],
+            [0, 255, 0, 255],
+            [0, 0, 255, 255],
+            [255, 255, 0, 255],
+            [255, 0, 255, 255],
+            [0, 255, 255, 255],
+            [255, 128, 0, 255],
+            [128, 0, 255, 255],
+            [0, 255, 128, 255],
+            [255, 0, 128, 255],
+            [0, 128, 255, 255],
+            [128, 255, 0, 255],
+        ],
+        dtype=np.uint8,
     )
 
     # Define the map
@@ -511,7 +493,7 @@ class SoilingAnalysis:
         if self.visualiser_flag:
             show_overlay(denoised_img, procedure_A_mask, particle_dicts)
 
-    def procedure_B(self, prominence=15, rolling_radius=50):
+    def procedure_B(self, edt_fraction, prominence, rolling_radius=50):
         """Run Procedure B: apply Otsu, DoG and fixed prominence masks, analyse particles.
 
         Args:
@@ -519,7 +501,7 @@ class SoilingAnalysis:
             rolling_radius (int): Radius for rolling ball background subtraction. Defaults to 50.
 
         Saves:
-            'Otsu Mask.png', 'DoG Mask.png', 'FIxed Prominence.png', 'Procedure B Mask.png'
+            'Otsu Mask.png', 'DoG Mask.png', 'Fixed Prominence.png', 'Procedure B Mask.png'
                 to output directory.
 
         Displays:
@@ -536,7 +518,9 @@ class SoilingAnalysis:
         # Apply masks
         otsu_mask = apply_otsu(denoised_img)
         dog_mask = apply_dog_triangle(denoised_img, self.gamma)
-        fixed_prominence_mask = apply_fixed_prominence_maxima(denoised_img, prominence)
+        fixed_prominence_mask = apply_fixed_prominence_maxima(
+            denoised_img, otsu_mask | dog_mask, edt_fraction, prominence
+        )
 
         procedure_B_mask = (otsu_mask | dog_mask) & fixed_prominence_mask
 
