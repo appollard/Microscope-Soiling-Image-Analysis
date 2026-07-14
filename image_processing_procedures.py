@@ -103,7 +103,7 @@ def img_to_file(img, filename, output_dir=None):
 ###################################################################################################
 
 
-def subtract_noise_rolling_ball(img, img_background, radius=50):
+def subtract_noise_rolling_ball(img, radius=50):
     """Remove noise using a rolling ball, as in ImageJ.
 
     Args:
@@ -120,7 +120,7 @@ def subtract_noise_rolling_ball(img, img_background, radius=50):
     denoised, _ = subtract_background_rolling_ball(
         img.copy(),
         radius,
-        light_background=img_background == "white",  # True if img_background is white
+        light_background=True,  # file_to_img always returns black soiling on white background
         use_paraboloid=False,
         do_presmooth=False,
     )
@@ -473,9 +473,7 @@ class SoilingAnalysis:
         ###################################################################################################
         # WIP
         ###################################################################################################
-        # denoised_img = subtract_noise_rolling_ball(
-        #    self.microscope_img, self.background, rolling_radius
-        # )
+        # denoised_img = subtract_noise_rolling_ball(self.microscope_img, rolling_radius)
         denoised_img = self.microscope_img
         ###################################################################################################
 
@@ -497,7 +495,7 @@ class SoilingAnalysis:
 
         # Visualise the result
         if self.visualiser_flag:
-            show_overlay(self.microscope_img, procedure_A_mask, particle_dicts)
+            show_overlay(denoised_img, procedure_A_mask, particle_dicts)
 
     def procedure_B(self, prominence=15, rolling_radius=50):
         """Run Procedure B: apply Otsu, DoG and fixed prominence masks, analyse particles.
