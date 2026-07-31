@@ -680,6 +680,8 @@ class SoilingAnalysis:
             show_overlay(self.microscope_img, procedure_B_mask, particle_dicts)
 
     def procedure_C(self, sigmas=[2, 82, 162], rolling_radius=50):
+        # sigma values from "scale=240 scale_division=3" in ImageJ. Based on the formulas
+        # in the source code, this yields [2, 2+240/3, 2+2*240/3], or [2, 82, 162].
 
         # Adjust luminance
         corrected_image_rgb = retinex_gimp(self.microscope_img, sigmas)
