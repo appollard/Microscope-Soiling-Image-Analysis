@@ -608,12 +608,9 @@ class SoilingAnalysis:
             Matplotlib overlay figure if visualiser_flag is True.
         """
         print(self.microscope_img.shape, self.microscope_img.dtype)
-        ###################################################################################################
-        # WIP
-        ###################################################################################################
+
         denoised_img = subtract_noise_rolling_ball(self.microscope_img, rolling_radius)
-        # denoised_img = self.microscope_img
-        ###################################################################################################
+        # denoised_img = self.microscope_img # Optional, for bug-fixing.
 
         # Apply masks
         otsu_mask = apply_otsu(denoised_img)
@@ -652,12 +649,8 @@ class SoilingAnalysis:
             Matplotlib overlay figure if visualiser_flag is True.
         """
 
-        ###################################################################################################
-        # WIP
-        ###################################################################################################
         denoised_img = subtract_noise_rolling_ball(self.microscope_img, rolling_radius)
-        # denoised_img = self.microscope_img
-        ###################################################################################################
+        # denoised_img = self.microscope_img # Optional, for bug-fixing
 
         # Apply masks
         otsu_mask = apply_otsu(denoised_img)
@@ -692,16 +685,12 @@ class SoilingAnalysis:
         corrected_image_rgb = retinex_gimp(self.microscope_img, sigmas)
         corrected_image = cv2.cvtColor(corrected_image_rgb, cv2.COLOR_BGR2GRAY)
 
-        ###################################################################################################
-        # WIP
-        ###################################################################################################
         denoised_img = subtract_noise_rolling_ball(corrected_image, rolling_radius)
-        # denoised_img = self.microscope_img
-        ###################################################################################################
+        # denoised_img = self.microscope_img # Optional, for bug-fixing
 
         # Apply masks
-        otsu_mask = apply_otsu(corrected_image)
-        dog_mask = apply_dog_triangle(corrected_image, self.gamma)
+        otsu_mask = apply_otsu(denoised_img)
+        dog_mask = apply_dog_triangle(denoised_img, self.gamma)
         procedure_C_mask = otsu_mask | dog_mask
 
         # Save masks/images
