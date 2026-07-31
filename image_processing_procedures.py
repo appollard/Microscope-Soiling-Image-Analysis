@@ -103,7 +103,7 @@ def img_to_file(img, filename, output_dir=None):
 ###################################################################################################
 
 
-def subtract_noise_rolling_ball(img, radius=50):
+def subtract_noise_rolling_ball_single(img, radius):
     """Remove noise using a rolling ball, as in ImageJ.
 
     Args:
@@ -117,7 +117,7 @@ def subtract_noise_rolling_ball(img, radius=50):
     """
 
     pad = int(radius)
-    img_padded = np.pad(img, pad, mode="reflect")
+    img_padded = np.pad(img, pad, mode="edge")
 
     result = subtract_background_rolling_ball(
         img_padded.copy(),
@@ -133,10 +133,17 @@ def subtract_noise_rolling_ball(img, radius=50):
     return denoised
 
 
+def subtract_noise_rolling_ball_full(img, radius=50):
+    if img.ndim == 2:
+        return subtract_noise_rolling_ball_single(img, radius)
+
+    channels = cv2.split(img)
+    corrected = [subtract_noise_rolling_ball_single(c, radius) for c in channels]
+    return cv2.merge(corrected)
+
+
 ###################################################################################################
 # ILLUMINATION NORMALISATION
-###################################################################################################
-# WIP
 ###################################################################################################
 
 # The following implementation of Retinex is sourced from:
@@ -609,7 +616,9 @@ class SoilingAnalysis:
         """
         print(self.microscope_img.shape, self.microscope_img.dtype)
 
-        denoised_img = subtract_noise_rolling_ball(self.microscope_img, rolling_radius)
+        denoised_img = subtract_noise_rolling_ball_full(
+            self.microscope_img, rolling_radius
+        )
         # denoised_img = self.microscope_img # Optional, for bug-fixing.
 
         # Apply masks
@@ -649,7 +658,9 @@ class SoilingAnalysis:
             Matplotlib overlay figure if visualiser_flag is True.
         """
 
-        denoised_img = subtract_noise_rolling_ball(self.microscope_img, rolling_radius)
+        denoised_img = subtract_noise_rolling_ball_full(
+            self.microscope_img, rolling_radius
+        )
         # denoised_img = self.microscope_img # Optional, for bug-fixing
 
         # Apply masks
@@ -683,21 +694,30 @@ class SoilingAnalysis:
         # sigma values from "scale=240 scale_division=3" in ImageJ. Based on the formulas
         # in the source code, this yields [2, 2+240/3, 2+2*240/3], or [2, 82, 162].
 
-        # Adjust luminance
-        corrected_image_rgb = retinex_gimp(self.microscope_img, sigmas)
-        corrected_image = cv2.cvtColor(corrected_image_rgb, cv2.COLOR_BGR2GRAY)
+        ###################################################################################################
+        # WIP
+        ###################################################################################################
+        # Right now it just accentuates all minor flaws and makes the program return one giant particle.
+        ###################################################################################################
+        # denoised_img = subtract_noise_rolling_ball_full(
+        #    self.microscope_img, rolling_radius
+        # )
+        ###################################################################################################
+        denoised_img = self.microscope_img  # Optional, for bug-fixing
 
-        denoised_img = subtract_noise_rolling_ball(corrected_image, rolling_radius)
-        # denoised_img = self.microscope_img # Optional, for bug-fixing
+        # Adjust luminance
+        corrected_img_rgb = retinex_gimp(denoised_img, sigmas)
+        corrected_img = cv2.cvtColor(corrected_img_rgb, cv2.COLOR_BGR2GRAY)
 
         # Apply masks
-        otsu_mask = apply_otsu(denoised_img)
-        dog_mask = apply_dog_triangle(denoised_img, self.gamma)
+        otsu_mask = apply_otsu(corrected_img)
+        otsu_mask = fill_outlines(otsu_mask)  # Done in Cody's
+        dog_mask = apply_dog_triangle(corrected_img, self.gamma)
         procedure_C_mask = otsu_mask | dog_mask
 
         # Save masks/images
         img_to_file(self.microscope_img, "Original Image.png", self.output_dir)
-        img_to_file(corrected_image, "Corrected Image.png", self.output_dir)
+        img_to_file(corrected_img, "Corrected Image.png", self.output_dir)
         img_to_file(255 - 255 * otsu_mask, "Otsu Mask.png", self.output_dir)
         img_to_file(255 - 255 * dog_mask, "DoG Mask.png", self.output_dir)
         img_to_file(
@@ -705,8 +725,7 @@ class SoilingAnalysis:
         )
 
         # Analyse particle count
-        filled_mask = fill_outlines(procedure_C_mask)
-        particle_dicts = identify_particles(filled_mask, self.um_per_pixel)
+        particle_dicts = identify_particles(procedure_C_mask, self.um_per_pixel)
 
         # Visualise the result
         if self.visualiser_flag:
