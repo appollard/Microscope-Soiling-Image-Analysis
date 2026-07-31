@@ -638,10 +638,17 @@ class SoilingAnalysis:
         """
         print(self.microscope_img.shape, self.microscope_img.dtype)
 
-        denoised_img = subtract_noise_rolling_ball_full(
-            self.microscope_img, rolling_radius
-        )
-        # denoised_img = self.microscope_img # Optional, for bug-fixing.
+        ###################################################################################################
+        # WIP
+        ###################################################################################################
+        # Right now it just creates artifacts around the edges (hollowing out particles) and makes each
+        # particle slightly wider.
+        ###################################################################################################
+        # denoised_img = subtract_noise_rolling_ball_full(
+        #    self.microscope_img, rolling_radius
+        # )
+        ###################################################################################################
+        denoised_img = self.microscope_img  # Optional, for bug-fixing.
 
         # Apply masks
         otsu_mask = apply_otsu(denoised_img)
