@@ -12,12 +12,10 @@ from scipy.ndimage import (
     distance_transform_edt,
     label as scipy_label,
 )
-from skimage.filters import threshold_otsu, threshold_triangle, gaussian
+from skimage.filters import threshold_otsu, threshold_triangle
 from skimage.measure import label, regionprops
-from skimage.morphology import flood_fill, extrema
-from skimage.feature import peak_local_max
+from skimage.morphology import extrema
 from skimage.segmentation import watershed, find_boundaries
-from skimage.exposure import equalize_adapthist
 
 ###################################################################################################
 # SAVING FUNCTIONS
@@ -53,15 +51,18 @@ def file_to_img(file, background_colour, img_dir="microscope_images"):
         raise FileNotFoundError(f"Image not found: {img_path}")
 
     img = cv2.imread(str(img_path))
-    if img.ndim == 3:
+    if not np.all(
+        img[:, :, 0] == img[:, :, 1]
+    ):  # Check if channels are identical (greyscale)
         return img  # Bypass for coloured images
 
+    img = img[:, :, 0]
     if background_colour == "black":
         img = 255 - img
     elif background_colour == "white":
         pass
     else:
-        raise ValueError("Acceptable values are 'black' or white'. Case sensitive.")
+        raise ValueError("Acceptable values are 'black' or 'white'. Case sensitive.")
     return img
 
 
@@ -118,13 +119,14 @@ def subtract_noise_rolling_ball(img, radius=50):
     pad = int(radius)
     img_padded = np.pad(img, pad, mode="reflect")
 
-    denoised_padded, _ = subtract_background_rolling_ball(
+    result = subtract_background_rolling_ball(
         img_padded.copy(),
         radius,
         light_background=True,  # file_to_img always returns black soiling on white background
         use_paraboloid=False,
         do_presmooth=True,
     )
+    denoised_padded = result[0]
 
     denoised = denoised_padded[pad:-pad, pad:-pad]
 
@@ -605,7 +607,7 @@ class SoilingAnalysis:
         Displays:
             Matplotlib overlay figure if visualiser_flag is True.
         """
-
+        print(self.microscope_img.shape, self.microscope_img.dtype)
         ###################################################################################################
         # WIP
         ###################################################################################################
