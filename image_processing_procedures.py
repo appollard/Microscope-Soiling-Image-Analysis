@@ -18,7 +18,6 @@ from skimage.morphology import flood_fill, extrema
 from skimage.feature import peak_local_max
 from skimage.segmentation import watershed, find_boundaries
 from skimage.exposure import equalize_adapthist
-from retinex import msrcr
 
 ###################################################################################################
 # SAVING FUNCTIONS
@@ -26,7 +25,7 @@ from retinex import msrcr
 
 
 def file_to_img(file, background_colour, img_dir="microscope_images"):
-    """Convert a .bmp or .jpg file into a uint8 greyscale image.
+    """Convert a .bmp or .jpg file into a uint8 greyscale or RGB image.
 
     Args:
         file (str | Path): File name or full path to the image.
@@ -138,36 +137,132 @@ def subtract_noise_rolling_ball(img, radius=50):
 # WIP
 ###################################################################################################
 
+# The following implementation of Retinex is sourced from:
+# https://github.com/muggledy/retinex
 
-# REPLACE WITH https://github.com/muggledy/retinex
-def correct_illumination(img_rgb, scale=240, scale_division=3, dynamic=2.12):
-    """
+# BSD 2-Clause License
+#
+# Copyright (c) 2020, Dai Yang
+# All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
+#
+# 1. Redistributions of source code must retain the above copyright notice, this
+#    list of conditions and the following disclaimer.
+#
+# 2. Redistributions in binary form must reproduce the above copyright notice,
+#    this list of conditions and the following disclaimer in the documentation
+#    and/or other materials provided with the distribution.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+# DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+# FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+# DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+# SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+# CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+# OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-    Args:
-        scale (int): Size of largest sigma. 240 in Procedure C documentation.
-        scale_division (int): Number of increments from 0 to [scale]. 3 in Procedure 3
-            documentation
-        dynamic (float): Anything outside of +-[]dynamic] standard deviations is clipped to 0 or
-            255. 2.12 in Procedure C documentation.
-    """
 
-    img_float = img_rgb.astype(np.float32) + 1.0
+def get_gauss_kernel(sigma, dim=2):
+    """1D gaussian function: G(x)=1/(sqrt{2π}σ)exp{-(x-μ)²/2σ²}. Herein, μ:=0, after
+    normalizing the 1D kernel, we can get 2D kernel version by
+    matmul(1D_kernel',1D_kernel), having same sigma in both directions. Note that
+    if you want to blur one image with a 2-D gaussian filter, you should separate
+    it into two steps(i.e. separate the 2-D filter into two 1-D filter, one column
+    filter, one row filter): 1) blur image with first column filter, 2) blur the
+    result image of 1) with the second row filter. Analyse the time complexity: if
+    m&n is the shape of image, p&q is the size of 2-D filter, bluring image with
+    2-D filter takes O(mnpq), but two-step method takes O(pmn+qmn)"""
+    ksize = int(np.floor(sigma * 6) / 2) * 2 + 1  # kernel size("3-σ"法则) refer to
+    # https://github.com/upcAutoLang/MSRCR-Restoration/blob/master/src/MSRCR.cpp
+    k_1D = np.arange(ksize) - ksize // 2
+    k_1D = np.exp(-(k_1D**2) / (2 * sigma**2))
+    k_1D = k_1D / np.sum(k_1D)
+    if dim == 1:
+        return k_1D
+    elif dim == 2:
+        return k_1D[:, None].dot(k_1D.reshape(1, -1))
 
-    sigmas = [scale * (i + 1) / scale_division for i in range(scale_division)]
 
-    result = np.zeros_like(img_float)
-    for sigma in sigmas:
-        result += np.log(img_float) - np.log(gaussian_filter(img_float, sigma) + 1.0)
-    result /= scale_division
+def gauss_blur_original(img, sigma):
+    """suitable for 1 or 3 channel image"""
+    row_filter = get_gauss_kernel(sigma, 1)
+    t = cv2.filter2D(
+        img, -1, row_filter[..., None], borderType=cv2.BORDER_REPLICATE
+    )  # Default border is reflect_101, ImageJ is replicate.
+    return cv2.filter2D(
+        t, -1, row_filter.reshape(1, -1), borderType=cv2.BORDER_REPLICATE
+    )
 
-    mean = result.mean()
-    std = result.std()
-    result = np.clip(result, mean - dynamic * std, mean + dynamic * std)
-    result -= result.min()
-    result /= result.max()
-    result = (result * 255).astype(np.uint8)
 
-    return cv2.cvtColor(result, cv2.COLOR_RGB2GRAY)
+def gauss_blur_recursive(img, sigma):
+    """refer to “Recursive implementation of the Gaussian filter”
+    (doi: 10.1016/0165-1684(95)00020-E). Paper considers it faster than
+    FFT(Fast Fourier Transform) implementation of a Gaussian filter.
+    Suitable for 1 or 3 channel image"""
+    pass
+
+
+def gauss_blur(img, sigma, method="original"):
+    if method == "original":
+        return gauss_blur_original(img, sigma)
+    elif method == "recursive":
+        return gauss_blur_recursive(img, sigma)
+
+
+def MultiScaleRetinex(img, sigmas=[15, 80, 250], weights=None, flag=True):
+    """equal to func retinex_MSR, just remove the outer for-loop. Practice has proven
+    that when MSR used in MSRCR or Gimp, we should add stretch step, otherwise the
+    result color may be dim. But it's up to you, if you select to neglect stretch,
+    set flag as False, have fun"""
+    if weights == None:
+        weights = np.ones(len(sigmas)) / len(sigmas)
+    elif not abs(sum(weights) - 1) < 0.00001:
+        raise ValueError("sum of weights must be 1!")
+    r = np.zeros(img.shape, dtype="double")
+    img = img.astype("double")
+    for i, sigma in enumerate(sigmas):
+        r += (
+            np.log(img + 1)
+            - np.log(
+                gaussian_filter(img, sigma=sigma, mode="nearest") + 1
+            )  # Repo uses gauss_blur- this appears to perform better.
+        ) * weights[i]
+    if flag:
+        mmin = np.min(r, axis=(0, 1), keepdims=True)
+        mmax = np.max(r, axis=(0, 1), keepdims=True)
+        r = (
+            (r - mmin) / (mmax - mmin) * 255
+        )  # maybe indispensable when used in MSRCR or Gimp, make pic vibrant
+        r = r.astype("uint8")
+    return r
+
+
+def retinex_gimp(img, sigmas=[12, 80, 250], dynamic=2):
+    """refer to the implementation in GIMP, it improves the stretch operation based 
+       on MSRCR, introduces mean and standard deviation, and a dynamic parameter to 
+       eliminate chromatic aberration, experiments show that it works well. see 
+       source code in https://github.com/piksels-and-lines-orchestra/gimp/blob/master \
+       /plug-ins/common/contrast-retinex.c"""
+    alpha = 128
+    gain = 1
+    offset = 0
+    img = img.astype("double") + 1  #
+    csum_log = np.log(np.sum(img, axis=2))
+    msr = MultiScaleRetinex(img - 1, sigmas)  # -1
+    r = gain * (np.log(alpha * img) - csum_log[..., None]) * msr + offset
+    mean = np.mean(r, axis=(0, 1), keepdims=True)
+    var = np.sqrt(np.sum((r - mean) ** 2, axis=(0, 1), keepdims=True) / r[..., 0].size)
+    mmin = mean - dynamic * var
+    mmax = mean + dynamic * var
+    stretch = (r - mmin) / (mmax - mmin) * 255
+    stretch[stretch > 255] = 255
+    stretch[stretch < 0] = 0
+    return stretch.astype("uint8")
 
 
 ###################################################################################################
@@ -589,10 +684,11 @@ class SoilingAnalysis:
         if self.visualiser_flag:
             show_overlay(self.microscope_img, procedure_B_mask, particle_dicts)
 
-    def procedure_C(self, rolling_radius=50):
+    def procedure_C(self, sigmas=[2, 82, 162], rolling_radius=50):
 
         # Adjust luminance
-        corrected_image = correct_illumination(self.microscope_img)
+        corrected_image_rgb = retinex_gimp(self.microscope_img, sigmas)
+        corrected_image = cv2.cvtColor(corrected_image_rgb, cv2.COLOR_BGR2GRAY)
 
         ###################################################################################################
         # WIP
