@@ -474,7 +474,7 @@ def colourful_particle_map(particle_list, mask):
             - 'circumference' (None): Reserved for future ellipse fitting.
             - 'corrected_diameter' (None): Reserved for future ellipse fitting.
             - 'corrected_area' (None): Reserved for future ellipse fitting.
-        mask (np.ndarray) Boolean mask where True indicates the presence of soiling
+        mask (np.ndarray): Boolean mask where True indicates the presence of soiling
 
     Returns:
         map (np.ndarray): RGBA image of shape (H, W, 4) and dtype uint8, where each
@@ -566,6 +566,28 @@ def show_overlay(microscope_img, mask, particle_list):
     plt.close("all")
 
 
+def plot_hist(diameters):
+    """Generate a histogram of the particle distribution.
+
+    Args:
+        diameters (np.ndarray): List of float diameters of particles, in um.
+
+    """
+
+    fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(24, 13.5))
+
+    bins = 201
+    ax.hist(diameters, bins=bins, log=True, alpha=0.6)
+    ax.set_xlim((min(diameters), max(diameters)))
+    ax.set_xlabel("Particle diameter (um)")
+    ax.set_ylabel("Number of particles")
+    ax.set_title("Frequency Plot of Particle Diameter")
+    ax.legend()
+    plt.show()
+
+    return
+
+
 ###################################################################################################
 # CLASS DEFINITION
 ###################################################################################################
@@ -639,6 +661,9 @@ class SoilingAnalysis:
         filled_mask = fill_outlines(procedure_A_mask)
         particle_dicts = identify_particles(filled_mask, self.um_per_pixel)
 
+        # Plot histogram of diameters.
+        plot_hist(np.array([p["effective_diameter"] for p in particle_dicts]))
+
         # Visualise the result
         if self.visualiser_flag:
             show_overlay(denoised_img, procedure_A_mask, particle_dicts)
@@ -686,6 +711,9 @@ class SoilingAnalysis:
         filled_mask = fill_outlines(procedure_B_mask)
         particle_dicts = identify_particles(filled_mask, self.um_per_pixel)
 
+        # Plot histogram of diameters.
+        plot_hist(np.array([p["effective_diameter"] for p in particle_dicts]))
+
         # Visualise the result
         if self.visualiser_flag:
             show_overlay(self.microscope_img, procedure_B_mask, particle_dicts)
@@ -726,6 +754,9 @@ class SoilingAnalysis:
 
         # Analyse particle count
         particle_dicts = identify_particles(procedure_C_mask, self.um_per_pixel)
+
+        # Plot histogram of diameters.
+        plot_hist(np.array([p["effective_diameter"] for p in particle_dicts]))
 
         # Visualise the result
         if self.visualiser_flag:
