@@ -1,12 +1,13 @@
 # Package
+import imagej
 from image_processing_procedures import SoilingAnalysis
 
-# Run Procedure A
-SoilingAnalysis(
-    "01.bmp", "black", 1 / 3.156, True, 0.9, "microscope_images", "outputs"
-).procedure_A(400)
+ij = imagej.init(r"C:\Users\snare\Fiji.app", mode="headless")
 
-# Run Procedure B
 SoilingAnalysis(
-    "09.bmp", "black", 1 / 3.156, True, 0.9, "microscope_images", "outputs"
-).procedure_B(15, 50)
+    "01.bmp", "black", ij, 1 / 3.156, True, 0.9, "microscope_images", "outputs"
+).procedure_A()
+
+SoilingAnalysis(
+    "09.jpg", "white", 1 / 3.156, True, 0.9, "microscope_images", "outputs"
+).procedure_C([2, 82, 162], 50)

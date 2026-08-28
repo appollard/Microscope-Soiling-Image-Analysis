@@ -17,6 +17,9 @@ from skimage.measure import label, regionprops
 from skimage.morphology import extrema
 from skimage.segmentation import watershed, find_boundaries
 
+import imagej
+from scyjava import jimport
+
 ###################################################################################################
 # SAVING FUNCTIONS
 ###################################################################################################
@@ -396,59 +399,36 @@ def fill_outlines(mask):
     return mask_filled
 
 
-def identify_particles(mask, um_per_pixel):
-    """Identify the particles in a mask and key information about them.
+def identify_particles(mask_np, um_per_pixel):
+    # Ensure boolean/binary
+    binary = mask_np > 0
 
-    Args:
-        mask (np.ndarray): Boolean array where True indicates the presence of soiling.
-        um_per_pixel (float): Conversion ratio with units microns/pixel.
-
-    Returns:
-        particle_dicts (list[dict]): One dict per particle, each containing:
-            - 'coords' (list[tuple]): Pixel coordinates as (row, col) tuples.
-            - 'centroid' (tuple[float, float]): (x, y) position in µm.
-            - 'effective_diameter' (float): Diameter of equivalent circle in µm.
-            - 'major_axis' (float): Major axis length of fitted ellipse in µm.
-            - 'minor_axis' (float): Minor axis length of fitted ellipse in µm.
-            - 'orientation' (float): Angle of major axis in radians.
-            - 'pixel_count' (int): Number of pixels in the particle.
-            - 'area' (float): Particle area in µm².
-            - 'outline_coords' (None): Reserved for future ellipse fitting.
-            - 'circumference' (None): Reserved for future ellipse fitting.
-            - 'corrected_diameter' (None): Reserved for future ellipse fitting.
-            - 'corrected_area' (None): Reserved for future ellipse fitting.
-    """
-
-    # Label connected regions (each particle gets a unique integer)
-    labelled = label(mask)
-    props = regionprops(labelled, intensity_image=mask)
+    labeled = label(binary)
+    props = regionprops(labeled)
 
     particle_dicts = []
     for p in props:
-        # coords from regionprops are (row, col) tuples, same as original
-        coords = [tuple(c) for c in p.coords.tolist()]
+        area_px = p.area
+        area_um2 = area_px * (um_per_pixel**2)
+        effective_diameter = np.sqrt(4 * area_um2 / np.pi)  # equivalent circle diameter
 
         particle_dicts.append(
             {
-                "coords": coords,
-                "centroid": (
-                    p.centroid[1] * um_per_pixel,  # x in um
-                    p.centroid[0] * um_per_pixel,
-                ),  # y in um
-                "effective_diameter": p.equivalent_diameter_area * um_per_pixel,
-                "major_axis": p.axis_major_length * um_per_pixel,
-                "minor_axis": p.axis_minor_length * um_per_pixel,
-                "orientation": p.orientation,
-                "pixel_count": len(coords),
-                "area": p.area * (um_per_pixel**2),
-                # kept as None — no ellipse method being run
-                "outline_coords": None,
-                "circumference": None,
-                "corrected_diameter": None,
-                "corrected_area": None,
+                "label": p.label,
+                "area_px": area_px,
+                "area_um2": area_um2,
+                "effective_diameter": effective_diameter,
+                "centroid": p.centroid,  # (row, col) in pixels
+                "perimeter_px": p.perimeter,
+                "eccentricity": p.eccentricity,
+                "major_axis_length": p.major_axis_length,
+                "minor_axis_length": p.minor_axis_length,
+                "bbox": p.bbox,
+                "coords": [
+                    tuple(coord) for coord in p.coords
+                ],  # (row, col) pixel list for plotting
             }
         )
-
     return particle_dicts
 
 
@@ -611,12 +591,16 @@ class SoilingAnalysis:
         self,
         img_name,
         background,
-        um_per_pixel,
-        visualiser_flag,
+        ij,
+        um_per_pixel=1 / 3.156,
+        visualiser_flag=True,
         gamma=0.9,
         image_dir="microscope_images",
         output_dir="outputs",
     ):
+        IJ = jimport("ij.IJ")
+        WindowManager = jimport("ij.WindowManager")
+        RoiManager = jimport("ij.plugin.frame.RoiManager")
         self.img_name = img_name
         self.background = background
         self.um_per_pixel = um_per_pixel
@@ -624,10 +608,23 @@ class SoilingAnalysis:
         self.gamma = gamma
         self.image_dir = image_dir
         self.output_dir = output_dir
+        self.threshold_method = "Triangle dark"
+        self.IJ = IJ
         # Read image with white soiling, black background
-        self.microscope_img = file_to_img(img_name, background, self.image_dir)
+        self.microscope_img = self.IJ.openImage(
+            os.path.join(self.image_dir, self.img_name)
+        )
+        self.IJ.run(
+            self.microscope_img,
+            "Set Scale...",
+            f"distance={self.um_per_pixel} known=1 unit=mu.m",
+        )
+        self.IJ.run(self.microscope_img, "8-bit", "")
+        self.microscope_img.setTitle("Raw")
+        self.RoiManager = RoiManager
+        self.gateway = ij
 
-    def procedure_A(self, rolling_radius=50):
+    def procedure_A(self):
         """Run Procedure A: apply Otsu and DoG masks, analyse particles.
 
         Saves:
@@ -636,36 +633,59 @@ class SoilingAnalysis:
         Displays:
             Matplotlib overlay figure if visualiser_flag is True.
         """
-        print(self.microscope_img.shape, self.microscope_img.dtype)
 
-        ###################################################################################################
-        # WIP
-        ###################################################################################################
-        # Right now it just creates artifacts around the edges (hollowing out particles) and makes each
-        # particle slightly wider.
-        ###################################################################################################
-        # denoised_img = subtract_noise_rolling_ball_full(
-        #    self.microscope_img, rolling_radius
-        # )
-        ###################################################################################################
-        denoised_img = self.microscope_img  # Optional, for bug-fixing.
+        # Handle Background
+        subtracted_background = self.microscope_img.duplicate()
+        self.IJ.run(
+            subtracted_background,
+            "Subtract Background...",
+            "rolling=50 sliding disable",
+        )
 
-        # Apply masks
-        otsu_mask = apply_otsu(denoised_img)
-        dog_mask = apply_dog_triangle(denoised_img, self.gamma)
-        procedure_A_mask = otsu_mask | dog_mask
+        # Handle otsu
+        mask1 = subtracted_background.duplicate()
+        mask1.setTitle("Mask1")
+        if self.background == "black":
+            self.IJ.setAutoThreshold(mask1, "Otsu dark")
+        elif self.background == "white":
+            self.IJ.setAutoThreshold(mask1, "Otsu light")
+        else:
+            ValueError("Background should be 'black' or 'white'")
+        self.IJ.run(mask1, "Convert to Mask", "")
 
-        # Save masks/corrected images
-        img_to_file(self.microscope_img, "Original Image.png", self.output_dir)
-        img_to_file(denoised_img, "Corrected Image.png", self.output_dir)
-        img_to_file(255 - 255 * otsu_mask, "Otsu Mask.png", self.output_dir)
-        img_to_file(255 - 255 * dog_mask, "DoG Mask.png", self.output_dir)
-        img_to_file(
-            255 - 255 * procedure_A_mask, "Procedure A Mask.png", self.output_dir
+        # Handle DoG
+        g1 = subtracted_background.duplicate()
+        g1.setTitle("G1")
+        g2 = subtracted_background.duplicate()
+        g2.setTitle("G2")
+
+        sigmaG1 = 1
+        sigmaG2 = 2
+        self.IJ.run(g1, "Gaussian Blur...", f"sigma={sigmaG1}")
+        self.IJ.run(g2, "Gaussian Blur...", f"sigma={sigmaG2}")
+
+        ic = jimport("ij.plugin.ImageCalculator")()
+        mask2 = ic.run("Subtract create", g1, g2)
+        self.IJ.run(mask2, "Gamma...", f"value={self.gamma}")
+        mask2.setTitle("Mask2")
+
+        self.IJ.setAutoThreshold(mask2, self.threshold_method)
+        self.IJ.run(mask2, "Convert to Mask", "")
+
+        # Combine Masks
+        binary_image = ic.run("OR create", mask1, mask2)
+        binary_image.setTitle("BinaryImage")
+
+        # Save images
+        self.IJ.saveAs(mask1, "png", os.path.join(self.output_dir, "Otsu Mask"))
+        self.IJ.saveAs(mask2, "png", os.path.join(self.output_dir, "DoG Mask"))
+        self.IJ.saveAs(
+            binary_image, "png", os.path.join(self.output_dir, "Procedure A Mask")
         )
 
         # Analyse particle count
-        filled_mask = fill_outlines(procedure_A_mask)
+        mask_np = self.gateway.py.from_java(binary_image)
+        filled_mask = fill_outlines(mask_np)
         particle_dicts = identify_particles(filled_mask, self.um_per_pixel)
 
         # Plot histogram of diameters.
@@ -673,7 +693,13 @@ class SoilingAnalysis:
 
         # Visualise the result
         if self.visualiser_flag:
-            show_overlay(denoised_img, procedure_A_mask, particle_dicts)
+            microscope_img_np = self.gateway.py.from_java(self.microscope_img)
+            show_overlay(microscope_img_np, mask_np, particle_dicts)
+
+        # Cleanup
+        for img in [mask1, mask2, g1, g2, binary_image, subtracted_background]:
+            if img is not None:
+                img.close()
 
     def procedure_B(self, prominence=15, rolling_radius=50):
         """Run Procedure B: apply Otsu, DoG and fixed prominence masks, analyse particles.
