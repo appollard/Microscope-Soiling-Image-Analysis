@@ -2,6 +2,7 @@
 import numpy as np
 import os
 import cv2
+import json
 from pathlib import Path
 import matplotlib.pyplot as plt
 from matplotlib.widgets import Slider
@@ -87,6 +88,46 @@ def img_to_file(img, filename, output_dir=None):
         img = np.clip(img, 0, 255).astype(np.uint8)
     cv2.imwrite(output_path, img)
     return
+
+
+def convert_numpy(obj):
+    # Convert numpy scalars
+    if isinstance(obj, (np.integer, np.floating)):
+        return obj.item()
+
+    # Convert numpy arrays
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+
+    # Convert dicts
+    if isinstance(obj, dict):
+        return {k: convert_numpy(v) for k, v in obj.items()}
+
+    # Convert lists/tuples
+    if isinstance(obj, (list, tuple)):
+        return [convert_numpy(v) for v in obj]
+
+    # Everything else stays as-is
+    return obj
+
+
+def save_to_json(list_of_dicts, output_dir, name):
+
+    # Root directory where this script lives
+    root_dir = Path(__file__).parent
+
+    # Folder inside the root directory
+    save_dir = root_dir / output_dir
+    save_dir.mkdir(exist_ok=True)
+
+    # Full path to the output file
+    output_path = save_dir / name
+
+    # Convert non-native types to native Python
+    cleaned_dicts = convert_numpy(list_of_dicts)
+
+    with open(output_path, "w", encoding="utf-8") as f:
+        json.dump(cleaned_dicts, f, indent=4)
 
 
 ###################################################################################################
@@ -330,7 +371,6 @@ class SoilingAnalysis:
             "Set Scale...",
             f"distance={self.um_per_pixel} known=1 unit=mu.m",
         )
-        self.IJ.run(self.microscope_img, "8-bit", "")
         self.microscope_img.setTitle("Raw")
         self.RoiManager = RoiManager
         self.gateway = ij
@@ -345,20 +385,24 @@ class SoilingAnalysis:
             Matplotlib overlay figure if visualiser_flag is True.
         """
 
-        # Handle Background
+        # Initialise
         subtracted_background = self.microscope_img.duplicate()
+        self.IJ.run(subtracted_background, "8-bit", "")
+
+        # Handle Background
         self.IJ.run(
             subtracted_background,
             "Subtract Background...",
             "rolling=50 sliding disable",
         )
+        # self.IJ.run(subtracted_background, "Enhance Contrast", "saturated=0.35")
 
-        # Handle otsu
+        # Handle Otsu
         self.threshold_method = "Triangle dark"
         mask1 = subtracted_background.duplicate()
         mask1.setTitle("Mask1")
-        if self.background == "black":
-            self.IJ.setAutoThreshold(mask1, "Otsu dark")
+        if self.background == "black":  # THIS LOGIC IS NOT PRESENT IN THE ORIGINAL
+            self.IJ.setAutoThreshold(mask1, "Otsu dark")  # THIS IS HARDCODED
         elif self.background == "white":
             self.IJ.setAutoThreshold(mask1, "Otsu light")
         else:
@@ -371,14 +415,15 @@ class SoilingAnalysis:
         g2 = subtracted_background.duplicate()
         g2.setTitle("G2")
 
-        sigmaG1 = 1
-        sigmaG2 = 2
-        self.IJ.run(g1, "Gaussian Blur...", f"sigma={sigmaG1}")
-        self.IJ.run(g2, "Gaussian Blur...", f"sigma={sigmaG2}")
+        self.IJ.sigmaG1 = 1
+        self.IJ.sigmaG2 = 2
+        self.IJ.run(g1, "Gaussian Blur...", f"sigma={self.IJ.sigmaG1}")
+        self.IJ.run(g2, "Gaussian Blur...", f"sigma={self.IJ.sigmaG2}")
 
         ic = jimport("ij.plugin.ImageCalculator")()
         mask2 = ic.run("Subtract create", g1, g2)
         self.IJ.run(mask2, "Gamma...", f"value={self.gamma}")
+        # self.IJ.run(mask2, "Enhance Contrast", "saturated=0.35")
         mask2.setTitle("Mask2")
 
         self.IJ.setAutoThreshold(mask2, self.threshold_method)
@@ -399,6 +444,9 @@ class SoilingAnalysis:
         mask_np = self.gateway.py.from_java(binary_image)
         filled_mask = fill_outlines(mask_np)
         particle_dicts = identify_particles(filled_mask, self.um_per_pixel)
+
+        # Save particle info
+        save_to_json(particle_dicts, self.output_dir, "particle_info")
 
         # Plot histogram of diameters.
         plot_hist(np.array([p["effective_diameter"] for p in particle_dicts]))
@@ -446,7 +494,7 @@ class SoilingAnalysis:
         )
         self.IJ.run(subtracted_background, "8-bit", "")
 
-        # Handle otsu
+        # Handle Otsu
         self.threshold_method = "Default"
         mask1 = subtracted_background.duplicate()
         mask1.setTitle("Mask1")
@@ -471,6 +519,7 @@ class SoilingAnalysis:
 
         ic = jimport("ij.plugin.ImageCalculator")()
         mask2 = ic.run("Subtract create 32-bit", g1, g2)
+        self.IJ.run(mask2, "Conversions...", "scale")
         self.IJ.run(mask2, "8-bit", "")
         mask2.setTitle("Mask2")
 
@@ -485,6 +534,11 @@ class SoilingAnalysis:
         self.IJ.saveAs(mask1, "png", os.path.join(self.output_dir, "Otsu Mask"))
         self.IJ.saveAs(mask2, "png", os.path.join(self.output_dir, "DoG Mask"))
         self.IJ.saveAs(
+            subtracted_background,
+            "png",
+            os.path.join(self.output_dir, "Processed Image"),
+        )
+        self.IJ.saveAs(
             binary_image, "png", os.path.join(self.output_dir, "Procedure C Mask")
         )
 
@@ -492,6 +546,9 @@ class SoilingAnalysis:
         mask_np = self.gateway.py.from_java(binary_image)
         filled_mask = fill_outlines(mask_np)
         particle_dicts = identify_particles(filled_mask, self.um_per_pixel)
+
+        # Save particle info
+        save_to_json(particle_dicts, self.output_dir, "particle_info")
 
         # Plot histogram of diameters.
         plot_hist(np.array([p["effective_diameter"] for p in particle_dicts]))
