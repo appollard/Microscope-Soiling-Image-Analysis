@@ -127,7 +127,7 @@ def save_to_json(list_of_dicts, output_dir, name):
     cleaned_dicts = convert_numpy(list_of_dicts)
 
     with open(output_path, "w", encoding="utf-8") as f:
-        json.dump(cleaned_dicts, f, indent=4)
+        json.dump(cleaned_dicts, f, indent=1)
 
 
 ###################################################################################################
@@ -415,10 +415,10 @@ class SoilingAnalysis:
         g2 = subtracted_background.duplicate()
         g2.setTitle("G2")
 
-        self.IJ.sigmaG1 = 1
-        self.IJ.sigmaG2 = 2
-        self.IJ.run(g1, "Gaussian Blur...", f"sigma={self.IJ.sigmaG1}")
-        self.IJ.run(g2, "Gaussian Blur...", f"sigma={self.IJ.sigmaG2}")
+        self.sigmaG1 = 1
+        self.sigmaG2 = 2
+        self.IJ.run(g1, "Gaussian Blur...", f"sigma={self.sigmaG1}")
+        self.IJ.run(g2, "Gaussian Blur...", f"sigma={self.sigmaG2}")
 
         ic = jimport("ij.plugin.ImageCalculator")()
         mask2 = ic.run("Subtract create", g1, g2)
@@ -446,7 +446,7 @@ class SoilingAnalysis:
         particle_dicts = identify_particles(filled_mask, self.um_per_pixel)
 
         # Save particle info
-        save_to_json(particle_dicts, self.output_dir, "particle_info")
+        save_to_json(particle_dicts, self.output_dir, "particle_info.json")
 
         # Plot histogram of diameters.
         plot_hist(np.array([p["effective_diameter"] for p in particle_dicts]))
@@ -512,10 +512,10 @@ class SoilingAnalysis:
         g2 = subtracted_background.duplicate()
         g2.setTitle("G2")
 
-        sigmaG1 = 1
-        sigmaG2 = 2
-        self.IJ.run(g1, "Gaussian Blur...", f"sigma={sigmaG1}")
-        self.IJ.run(g2, "Gaussian Blur...", f"sigma={sigmaG2}")
+        self.sigmaG1 = 1
+        self.sigmaG2 = 2
+        self.IJ.run(g1, "Gaussian Blur...", f"sigma={self.sigmaG1}")
+        self.IJ.run(g2, "Gaussian Blur...", f"sigma={self.sigmaG2}")
 
         ic = jimport("ij.plugin.ImageCalculator")()
         mask2 = ic.run("Subtract create 32-bit", g1, g2)
@@ -548,7 +548,7 @@ class SoilingAnalysis:
         particle_dicts = identify_particles(filled_mask, self.um_per_pixel)
 
         # Save particle info
-        save_to_json(particle_dicts, self.output_dir, "particle_info")
+        save_to_json(particle_dicts, self.output_dir, "particle_info.json")
 
         # Plot histogram of diameters.
         plot_hist(np.array([p["effective_diameter"] for p in particle_dicts]))
