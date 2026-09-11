@@ -50,6 +50,7 @@ def get_args():
 
     # Particle analysis
     parser.add_argument("--exclude-edges", action="store_true")
+    parser.add_argument("--show-visualiser", action="store_true")
 
     return parser.parse_args()
 
@@ -242,57 +243,72 @@ class ParticleInfo:
 
     def run(self, mask):
 
-        RoiManager = jimport("ij.plugin.frame.RoiManager")
         ResultsTable = jimport("ij.measure.ResultsTable")
+        Measurements = jimport("ij.measure.Measurements")
+        ParticleAnalyzer = jimport("ij.plugin.filter.ParticleAnalyzer")
 
         # Make sure all values are in pixels so we can do the processing ourselves
         self.IJ.run(mask, "Set Scale...", "distance=0 known=0 unit=pixel")
 
-        # Set gathered measurements to area/perimeter/centroid + bounding box + ellipse fit (major/minor axis) + shape (eccentricity source)
-        self.IJ.run(
-            mask,
-            "Set Measurements...",
-            "area centroid perimeter bounding fit shape redirect=None decimal=4",
-        )
-
-        # For identifying the pixels in each particle
-        roi_manager = RoiManager(True)
-        roi_manager.reset()
-
-        # For identifying the measurments of each particle
+        # Use the analyzer API directly so headless ImageJ does not open its dialog.
         rt = ResultsTable.getResultsTable()
         rt.reset()
 
-        # Add populated ROI manager, display populated results table, exclude excludes edge particles if desired
-        # Construct particle analysis string
-        if self.args.exclude_edges:
-            analyzer_str = "size=0-Infinity exclude clear add display"
-        else:
-            analyzer_str = "size=0-Infinity clear add display"
-        self.IJ.run(
-            mask,
-            "Analyze Particles...",
-            analyzer_str,
+        # Define the measurements we will receive from ImageJ's analyzer
+        measurements = (
+            Measurements.AREA
+            | Measurements.CENTROID
+            | Measurements.PERIMETER
+            | Measurements.RECT
+            | Measurements.ELLIPSE
+            | Measurements.SHAPE_DESCRIPTORS
         )
 
-        # Retrieve each region of interest (particle)
-        rois = roi_manager.getRoisAsArray()
+        analyzer_options = ParticleAnalyzer.CLEAR_WORKSHEET | ParticleAnalyzer.SHOW_NONE
+        if self.args.exclude_edges:
+            analyzer_options |= ParticleAnalyzer.EXCLUDE_EDGE_PARTICLES
+
+        # Call the particle analyzer
+        analyzer = ParticleAnalyzer(
+            analyzer_options,
+            measurements,
+            rt,
+            0.0,
+            float("inf"),
+        )
+        analyzer.analyze(mask)
 
         # Convert mask to numpy array
         mask_np = self.gateway.py.from_java(mask)
 
-        # Identify particles and retrieve information
-        particle_dicts = ut.identify_particles(
-            rt, rois, self.args.scale, self.args.gateway
+        # Identify particles from the mask because ROI Manager is GUI-only in headless mode.
+        particle_dicts = ut.identify_particles_from_mask(
+            rt,
+            mask_np,
+            self.args.scale,
+            self.args.exclude_edges,
         )
 
-        roi_manager.reset()
         rt.reset()
 
         # Save particle information to json
         ut.save_to_json(particle_dicts, self.args.output_dir, "Particle_info.json")
 
         return particle_dicts
+
+
+class Visualisation:
+    def __init__(self, args, gateway):
+        self.args = args
+        self.gateway = gateway
+
+    def run(self, particle_dicts, original_image, mask):
+
+        # Show visualiser
+        if self.args.show_visualiser:
+            original_np = self.gateway.py.from_java(original_image)
+            mask_np = self.gateway.py.from_java(mask)
+            ut.show_overlay(original_np, mask_np, particle_dicts)
 
 
 def main():
@@ -310,12 +326,14 @@ def main():
     DoG = DoGStage(IJ, args)
     combination = CombinationStage(IJ, args)
     particle_info = ParticleInfo(IJ, args, ij)
+    visualiser = Visualisation(args, ij)
 
     processed_img = preprocessing.run(microscope_img)
     otsu_mask = otsu.run(processed_img)
     DoG_mask = DoG.run(processed_img)
     combined_mask = combination.run([otsu_mask, DoG_mask])
     particle_dicts = particle_info.run(combined_mask)
+    visual_interface = visualiser.run(particle_dicts, microscope_img, combined_mask)
 
     ij.dispose()
     sys.exit(0)
@@ -332,22 +350,22 @@ if __name__ == "__main__":
 # --scale [PIXEL SCALE] [--colour] [--retinex] --retinex-type [TYPE] --retinex-scale [SCALE] --retinex-scale-division [DIVS]
 # --retinex-dynamic [DYNAMIC] --background [COLOUR] [--rolling-ball] [--presmoothing] [--sliding] --rolling-radius [RADIUS]
 # [--close-particles] [--fill-particles] [--de-agglomerate-particles] [--high-precision-DoG] --sigma1 [VAL] --sigma2 [VAL] --gamma [VAL] --DoG-mask [MASK TYPE]
-# [--exclude-edges]
+# [--exclude-edges] [--show-visualiser]
 
 
 # Procedure A Copy-paste for 01.bmp image (fill in your info):
 
-# --fiji-dir "[Fiji.app DIRECTORY]" --input-file "01.bmp" --input_dir "[ROOT DIRECTORY INPUT FOLDER]" --output-dir "[ROOT DIRECTORY OUTPUT FOLDER]" --scale 0.31685 --background "black" --rolling-ball --sliding --rolling-radius 50 --sigma1 1 --sigma2 2 --gamma 0.9 --DoG-mask "Triangle" --exclude-edges
+# --fiji-dir "[Fiji.app DIRECTORY]" --input-file "01.bmp" --input_dir "[ROOT DIRECTORY INPUT FOLDER]" --output-dir "[ROOT DIRECTORY OUTPUT FOLDER]" --scale 0.31685 --background "black" --rolling-ball --sliding --rolling-radius 50 --sigma1 1 --sigma2 2 --gamma 0.9 --DoG-mask "Triangle" --exclude-edges --show-visualiser
 
 # Procedure A Copy-paste example:
 
-# --fiji-dir "C:\Users\snare\Fiji.app" --input-file "01.bmp" --input_dir "microscope_images" --output-dir "outputs" --scale 0.31685 --background "black" --rolling-ball --sliding --rolling-radius 50 --sigma1 1 --sigma2 2 --gamma 0.9 --DoG-mask "Triangle" --exclude-edges
+# --fiji-dir "C:\Users\snare\Fiji.app" --input-file "01.bmp" --input_dir "microscope_images" --output-dir "outputs" --scale 0.31685 --background "black" --rolling-ball --sliding --rolling-radius 50 --sigma1 1 --sigma2 2 --gamma 0.9 --DoG-mask "Triangle" --exclude-edges --show-visualiser
 
 
 # Procedure C Copy-paste for 09.jpg image (fill in your info):
 
-# --fiji-dir [Fiji.app DIRECTORY]  --input-file "09.jpg" --input_dir [ROOT DIRECTORY INPUT FOLDER] --output-dir [ROOT DIRECTORY OUTPUT FOLDER] --scale 2.155 --colour --retinex --retinex-type "Uniform" --retinex-scale 240 --retinex-scale-division 3 --retinex-dynamic 2.12 --background "white" --rolling-ball --presmoothing --sliding --rolling-radius 50 --close-particles --fill-particles --de-agglomerate-particles --high-precision-DoG --sigma1 1 --sigma2 2 --gamma 1 --DoG-mask "Default" --exclude-edges
+# --fiji-dir [Fiji.app DIRECTORY]  --input-file "09.jpg" --input_dir [ROOT DIRECTORY INPUT FOLDER] --output-dir [ROOT DIRECTORY OUTPUT FOLDER] --scale 2.155 --colour --retinex --retinex-type "Uniform" --retinex-scale 240 --retinex-scale-division 3 --retinex-dynamic 2.12 --background "white" --rolling-ball --presmoothing --sliding --rolling-radius 50 --close-particles --fill-particles --de-agglomerate-particles --high-precision-DoG --sigma1 1 --sigma2 2 --gamma 1 --DoG-mask "Default" --exclude-edges --show-visualiser
 
 # Procedure C Copy-paste example:
 
-# --fiji-dir "C:\Users\snare\Fiji.app"  --input-file "09.jpg" --input_dir "microscope_images" --output-dir "outputs" --scale 2.155  --colour --retinex --retinex-type "Uniform" --retinex-scale 240 --retinex-scale-division 3 --retinex-dynamic 2.12 --background "white" --rolling-ball --presmoothing --sliding --rolling-radius 50 --close-particles --fill-particles --de-agglomerate-particles --high-precision-DoG --sigma1 1 --sigma2 2 --gamma 1 --DoG-mask "Default" --exclude-edges
+# --fiji-dir "C:\Users\snare\Fiji.app"  --input-file "09.jpg" --input_dir "microscope_images" --output-dir "outputs" --scale 2.155  --colour --retinex --retinex-type "Uniform" --retinex-scale 240 --retinex-scale-division 3 --retinex-dynamic 2.12 --background "white" --rolling-ball --presmoothing --sliding --rolling-radius 50 --close-particles --fill-particles --de-agglomerate-particles --high-precision-DoG --sigma1 1 --sigma2 2 --gamma 1 --DoG-mask "Default" --exclude-edges --show-visualiser
