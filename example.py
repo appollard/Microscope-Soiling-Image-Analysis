@@ -1,7 +1,8 @@
 import os
-import sys
+from pathlib import Path
 import utilities as ut
 from scyjava import jimport
+from skimage.measure import label, regionprops
 
 import argparse
 
@@ -40,16 +41,12 @@ def get_args():
     parser.add_argument("--de-agglomerate-particles", action="store_true")
 
     # Mask 2: DoG
-    parser.add_argument("--high-precision-DoG", action="store_true")
     parser.add_argument("--sigma1", type=float, default=1.0)
     parser.add_argument("--sigma2", type=float, default=2.0)
     parser.add_argument("--gamma", type=float, default=1.0)
     parser.add_argument(
         "--DoG-mask", choices=["Triangle", "Default"], default="Triangle"
     )  # need to check background colour when processing
-
-    # Particle analysis
-    parser.add_argument("--exclude-edges", action="store_true")
 
     return parser.parse_args()
 
@@ -162,7 +159,6 @@ class DoGStage:
         img = processed_img.duplicate()
         g1 = img.duplicate()
         g2 = img.duplicate()
-        img.close()
 
         # Obtain the blurs
         self.IJ.run(g1, "Gaussian Blur...", f"sigma={self.args.sigma1}")
@@ -171,19 +167,17 @@ class DoGStage:
         # Obtain image calculator
         ic = jimport("ij.plugin.ImageCalculator")()
 
-        # Calculate the DoG using high or not-high precision
-        if self.args.high_precision_DoG:
-            img = ic.run("Subtract create 32-bit", g1, g2)
-            self.IJ.run(img, "Conversions...", "scale")
-            self.IJ.run(img, "8-bit", "")
-        else:
-            img = ic.run("Subtract create", g1, g2)
+        # Calculate the DoG
+        img = ic.run("Subtract create 32-bit", g1, g2)
+
+        # Apply gamma correction (default of 1, does nothing)
+        self.IJ.run(img, "Gamma...", f"value={self.args.gamma}")
 
         # Set float32_t -> uint8_t conversion to rescale rather than truncate
         self.IJ.run(img, "Conversions...", "scale")
 
-        # Apply gamma correction (default of 1, does nothing)
-        self.IJ.run(img, "Gamma...", f"value={self.args.gamma}")
+        # Convert to greyscale
+        self.IJ.run(img, "8-bit", "")
 
         # Setup threshold string
         flags = [self.args.DoG_mask]
@@ -198,9 +192,9 @@ class DoGStage:
         self.IJ.run(img, "Convert to Mask", "")
 
         # Cleanup
-        for item in [g1, g2]:
-            if item is not None:
-                item.close()
+        for img in [g1, g2]:
+            if img is not None:
+                img.close()
 
         # Save mask image
         self.IJ.saveAs(img, "png", os.path.join(self.args.output_dir, "DoG Mask"))
@@ -242,52 +236,11 @@ class ParticleInfo:
 
     def run(self, mask):
 
-        RoiManager = jimport("ij.plugin.frame.RoiManager")
-        ResultsTable = jimport("ij.measure.ResultsTable")
-
-        # Make sure all values are in pixels so we can do the processing ourselves
-        self.IJ.run(mask, "Set Scale...", "distance=0 known=0 unit=pixel")
-
-        # Set gathered measurements to area/perimeter/centroid + bounding box + ellipse fit (major/minor axis) + shape (eccentricity source)
-        self.IJ.run(
-            mask,
-            "Set Measurements...",
-            "area centroid perimeter bounding fit shape redirect=None decimal=4",
-        )
-
-        # For identifying the pixels in each particle
-        roi_manager = RoiManager(True)
-        roi_manager.reset()
-
-        # For identifying the measurments of each particle
-        rt = ResultsTable.getResultsTable()
-        rt.reset()
-
-        # Add populated ROI manager, display populated results table, exclude excludes edge particles if desired
-        # Construct particle analysis string
-        if self.args.exclude_edges:
-            analyzer_str = "size=0-Infinity exclude clear add display"
-        else:
-            analyzer_str = "size=0-Infinity clear add display"
-        self.IJ.run(
-            mask,
-            "Analyze Particles...",
-            analyzer_str,
-        )
-
-        # Retrieve each region of interest (particle)
-        rois = roi_manager.getRoisAsArray()
-
         # Convert mask to numpy array
         mask_np = self.gateway.py.from_java(mask)
 
         # Identify particles and retrieve information
-        particle_dicts = ut.identify_particles(
-            rt, rois, self.args.scale, self.args.gateway
-        )
-
-        roi_manager.reset()
-        rt.reset()
+        particle_dicts = ut.identify_particles(mask_np, self.args.scale)
 
         # Save particle information to json
         ut.save_to_json(particle_dicts, self.args.output_dir, "Particle_info.json")
@@ -317,37 +270,8 @@ def main():
     combined_mask = combination.run([otsu_mask, DoG_mask])
     particle_dicts = particle_info.run(combined_mask)
 
-    ij.dispose()
-    sys.exit(0)
-    return 0
-
 
 if __name__ == "__main__":
     main()
 
-# Command line structure. Entire commands inside square brackets indicate that
-# this is set to true if the command is included:
-
-# --fiji-dir [YOUR DIRECTORY FOR Fiji.app]  --input-file [IMAGE NAME] --input_dir [FOLDER IT'S IN] --output-dir [FOLDER TO SAVE THE OUTPUTS]
-# --scale [PIXEL SCALE] [--colour] [--retinex] --retinex-type [TYPE] --retinex-scale [SCALE] --retinex-scale-division [DIVS]
-# --retinex-dynamic [DYNAMIC] --background [COLOUR] [--rolling-ball] [--presmoothing] [--sliding] --rolling-radius [RADIUS]
-# [--close-particles] [--fill-particles] [--de-agglomerate-particles] [--high-precision-DoG] --sigma1 [VAL] --sigma2 [VAL] --gamma [VAL] --DoG-mask [MASK TYPE]
-# [--exclude-edges]
-
-
-# Procedure A Copy-paste for 01.bmp image (fill in your info):
-
-# --fiji-dir "[Fiji.app DIRECTORY]" --input-file "01.bmp" --input_dir "[ROOT DIRECTORY INPUT FOLDER]" --output-dir "[ROOT DIRECTORY OUTPUT FOLDER]" --scale 0.31685 --background "black" --rolling-ball --sliding --rolling-radius 50 --sigma1 1 --sigma2 2 --gamma 0.9 --DoG-mask "Triangle" --exclude-edges
-
-# Procedure A Copy-paste example:
-
-# --fiji-dir "C:\Users\snare\Fiji.app" --input-file "01.bmp" --input_dir "microscope_images" --output-dir "outputs" --scale 0.31685 --background "black" --rolling-ball --sliding --rolling-radius 50 --sigma1 1 --sigma2 2 --gamma 0.9 --DoG-mask "Triangle" --exclude-edges
-
-
-# Procedure C Copy-paste for 09.jpg image (fill in your info):
-
-# --fiji-dir [Fiji.app DIRECTORY]  --input-file "09.jpg" --input_dir [ROOT DIRECTORY INPUT FOLDER] --output-dir [ROOT DIRECTORY OUTPUT FOLDER] --scale 2.155 --colour --retinex --retinex-type "Uniform" --retinex-scale 240 --retinex-scale-division 3 --retinex-dynamic 2.12 --background "white" --rolling-ball --presmoothing --sliding --rolling-radius 50 --close-particles --fill-particles --de-agglomerate-particles --high-precision-DoG --sigma1 1 --sigma2 2 --gamma 1 --DoG-mask "Default" --exclude-edges
-
-# Procedure C Copy-paste example:
-
-# --fiji-dir "C:\Users\snare\Fiji.app"  --input-file "09.jpg" --input_dir "microscope_images" --output-dir "outputs" --scale 2.155  --colour --retinex --retinex-type "Uniform" --retinex-scale 240 --retinex-scale-division 3 --retinex-dynamic 2.12 --background "white" --rolling-ball --presmoothing --sliding --rolling-radius 50 --close-particles --fill-particles --de-agglomerate-particles --high-precision-DoG --sigma1 1 --sigma2 2 --gamma 1 --DoG-mask "Default" --exclude-edges
+# Procedure A
