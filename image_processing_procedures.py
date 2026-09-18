@@ -3,57 +3,6 @@ import sys
 import utilities as ut
 from scyjava import jimport
 
-import argparse
-
-
-def get_args():
-    parser = argparse.ArgumentParser()
-
-    # Misc
-    parser.add_argument("--fiji-dir", default=r"C:\Users\snare\Fiji.app")
-
-    # Setup
-    parser.add_argument("--input-file", required=True)
-    parser.add_argument("--input_dir", default="microscope_images")
-    parser.add_argument("--output-dir", default="outputs")
-    parser.add_argument("--scale", type=float, default=1 / 3.156)
-
-    # Preprocessing
-    parser.add_argument("--colour", action="store_true")
-    parser.add_argument("--retinex", action="store_true")
-    parser.add_argument(
-        "--retinex-type", choices=["Uniform", "Low", "High"], default="Uniform"
-    )
-    parser.add_argument("--retinex-scale", type=int, default=240)
-    parser.add_argument("--retinex-scale-division", type=int, default=3)
-    parser.add_argument("--retinex-dynamic", type=float, default=2.12)
-
-    parser.add_argument("--background", choices=["white", "black"], default="white")
-    parser.add_argument("--rolling-ball", action="store_true")
-    parser.add_argument("--presmoothing", action="store_true")
-    parser.add_argument("--sliding", action="store_true")
-    parser.add_argument("--rolling-radius", type=int, default=50)
-
-    # Mask 1: Otsu
-    parser.add_argument("--close-particles", action="store_true")
-    parser.add_argument("--fill-particles", action="store_true")
-    parser.add_argument("--de-agglomerate-particles", action="store_true")
-
-    # Mask 2: DoG
-    parser.add_argument("--high-precision-DoG", action="store_true")
-    parser.add_argument("--sigma1", type=float, default=1.0)
-    parser.add_argument("--sigma2", type=float, default=2.0)
-    parser.add_argument("--gamma", type=float, default=1.0)
-    parser.add_argument(
-        "--DoG-mask", choices=["Triangle", "Default"], default="Triangle"
-    )  # need to check background colour when processing
-
-    # Particle analysis
-    parser.add_argument("--exclude-edges", action="store_true")
-    parser.add_argument("--show-visualiser", action="store_true")
-
-    return parser.parse_args()
-
 
 class PreprocessingStage:
     def __init__(self, IJ, args):
@@ -294,6 +243,12 @@ class ParticleInfo:
         # Save particle information to json
         ut.save_to_json(particle_dicts, self.args.output_dir, "Particle_info.json")
 
+        # Extract whole-particle information
+        soiling_data = ut.soiling_info(particle_dicts)
+
+        # Save whole-image information to json
+        ut.save_to_json(soiling_data, self.args.output_dir, "Soiling_info.json")
+
         return particle_dicts
 
 
@@ -314,7 +269,7 @@ class Visualisation:
 def main():
     import imagej
 
-    args = get_args()
+    args = ut.get_args()
 
     ij = imagej.init(args.fiji_dir, mode="headless")
     IJ = jimport("ij.IJ")
@@ -346,7 +301,7 @@ if __name__ == "__main__":
 # Command line structure. Entire commands inside square brackets indicate that
 # this is set to true if the command is included:
 
-# --fiji-dir [YOUR DIRECTORY FOR Fiji.app]  --input-file [IMAGE NAME] --input_dir [FOLDER IT'S IN] --output-dir [FOLDER TO SAVE THE OUTPUTS]
+# --fiji-dir [YOUR DIRECTORY FOR Fiji.app]  --input-file [IMAGE NAME] --input-dir [FOLDER IT'S IN] --output-dir [FOLDER TO SAVE THE OUTPUTS]
 # --scale [PIXEL SCALE] [--colour] [--retinex] --retinex-type [TYPE] --retinex-scale [SCALE] --retinex-scale-division [DIVS]
 # --retinex-dynamic [DYNAMIC] --background [COLOUR] [--rolling-ball] [--presmoothing] [--sliding] --rolling-radius [RADIUS]
 # [--close-particles] [--fill-particles] [--de-agglomerate-particles] [--high-precision-DoG] --sigma1 [VAL] --sigma2 [VAL] --gamma [VAL] --DoG-mask [MASK TYPE]
@@ -355,17 +310,18 @@ if __name__ == "__main__":
 
 # Procedure A Copy-paste for 01.bmp image (fill in your info):
 
-# --fiji-dir "[Fiji.app DIRECTORY]" --input-file "01.bmp" --input_dir "[ROOT DIRECTORY INPUT FOLDER]" --output-dir "[ROOT DIRECTORY OUTPUT FOLDER]" --scale 0.31685 --background "black" --rolling-ball --sliding --rolling-radius 50 --sigma1 1 --sigma2 2 --gamma 0.9 --DoG-mask "Triangle" --exclude-edges --show-visualiser
+# --fiji-dir "[Fiji.app DIRECTORY]" --input-file "01.bmp" --input-dir "[ROOT DIRECTORY INPUT FOLDER]" --output-dir "[ROOT DIRECTORY OUTPUT FOLDER]" --scale 0.31685 --background "black" --rolling-ball --sliding --rolling-radius 50 --sigma1 1 --sigma2 2 --gamma 0.9 --DoG-mask "Triangle" --exclude-edges --show-visualiser
 
-# Procedure A Copy-paste example:
+# Procedure A Copy-paste examples (with and without preset):
 
-# --fiji-dir "C:\Users\snare\Fiji.app" --input-file "01.bmp" --input_dir "microscope_images" --output-dir "outputs" --scale 0.31685 --background "black" --rolling-ball --sliding --rolling-radius 50 --sigma1 1 --sigma2 2 --gamma 0.9 --DoG-mask "Triangle" --exclude-edges --show-visualiser
+# --fiji-dir "C:\Users\snare\Fiji.app" --input-file "01.bmp" --input-dir "microscope_images" --output-dir "outputs" --show-visualiser --procedure A
+# --fiji-dir "C:\Users\snare\Fiji.app" --input-file "01.bmp" --input-dir "microscope_images" --output-dir "outputs" --scale 0.31685 --background "black" --rolling-ball --sliding --rolling-radius 50 --sigma1 1 --sigma2 2 --gamma 0.9 --DoG-mask "Triangle" --exclude-edges --show-visualiser
 
 
 # Procedure C Copy-paste for 09.jpg image (fill in your info):
 
-# --fiji-dir [Fiji.app DIRECTORY]  --input-file "09.jpg" --input_dir [ROOT DIRECTORY INPUT FOLDER] --output-dir [ROOT DIRECTORY OUTPUT FOLDER] --scale 2.155 --colour --retinex --retinex-type "Uniform" --retinex-scale 240 --retinex-scale-division 3 --retinex-dynamic 2.12 --background "white" --rolling-ball --presmoothing --sliding --rolling-radius 50 --close-particles --fill-particles --de-agglomerate-particles --high-precision-DoG --sigma1 1 --sigma2 2 --gamma 1 --DoG-mask "Default" --exclude-edges --show-visualiser
+# --fiji-dir [Fiji.app DIRECTORY]  --input-file "09.jpg" --input-dir [ROOT DIRECTORY INPUT FOLDER] --output-dir [ROOT DIRECTORY OUTPUT FOLDER] --scale 2.155 --colour --retinex --retinex-type "Uniform" --retinex-scale 240 --retinex-scale-division 3 --retinex-dynamic 2.12 --background "white" --rolling-ball --presmoothing --sliding --rolling-radius 50 --close-particles --fill-particles --de-agglomerate-particles --high-precision-DoG --sigma1 1 --sigma2 2 --gamma 1 --DoG-mask "Default" --exclude-edges --show-visualiser
 
 # Procedure C Copy-paste example:
 
-# --fiji-dir "C:\Users\snare\Fiji.app"  --input-file "09.jpg" --input_dir "microscope_images" --output-dir "outputs" --scale 2.155  --colour --retinex --retinex-type "Uniform" --retinex-scale 240 --retinex-scale-division 3 --retinex-dynamic 2.12 --background "white" --rolling-ball --presmoothing --sliding --rolling-radius 50 --close-particles --fill-particles --de-agglomerate-particles --high-precision-DoG --sigma1 1 --sigma2 2 --gamma 1 --DoG-mask "Default" --exclude-edges --show-visualiser
+# --fiji-dir "C:\Users\snare\Fiji.app"  --input-file "09.jpg" --input-dir "microscope_images" --output-dir "outputs" --scale 2.155  --colour --retinex --retinex-type "Uniform" --retinex-scale 240 --retinex-scale-division 3 --retinex-dynamic 2.12 --background "white" --rolling-ball --presmoothing --sliding --rolling-radius 50 --close-particles --fill-particles --de-agglomerate-particles --high-precision-DoG --sigma1 1 --sigma2 2 --gamma 1 --DoG-mask "Default" --exclude-edges --show-visualiser

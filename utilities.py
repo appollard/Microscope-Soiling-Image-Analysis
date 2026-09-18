@@ -4,6 +4,112 @@ import numpy as np
 from scipy import ndimage
 from matplotlib import pyplot as plt
 from matplotlib.widgets import Slider
+import argparse
+
+
+def get_CLI_args():
+    parser = argparse.ArgumentParser()
+
+    #### PRESETS ####
+    parser.add_argument("--procedure", choices=["A", "C"])
+
+    #### RAW VARIABLES ####
+    # Misc
+    parser.add_argument("--fiji-dir", default=r"C:\Users\snare\Fiji.app")
+
+    # Setup
+    parser.add_argument("--input-file", required=True)
+    parser.add_argument("--input-dir", default="microscope_images")
+    parser.add_argument("--output-dir", default="outputs")
+    parser.add_argument("--scale", type=float)
+
+    # Preprocessing
+    parser.add_argument("--colour", action="store_true")
+    parser.add_argument("--retinex", action="store_true")
+    parser.add_argument("--retinex-type", choices=["Uniform", "Low", "High"])
+    parser.add_argument("--retinex-scale", type=int)
+    parser.add_argument("--retinex-scale-division", type=int)
+    parser.add_argument("--retinex-dynamic", type=float)
+
+    parser.add_argument("--background", choices=["white", "black"])
+    parser.add_argument("--rolling-ball", action="store_true")
+    parser.add_argument("--presmoothing", action="store_true")
+    parser.add_argument("--sliding", action="store_true")
+    parser.add_argument("--rolling-radius", type=int)
+
+    # Mask 1: Otsu
+    parser.add_argument("--close-particles", action="store_true")
+    parser.add_argument("--fill-particles", action="store_true")
+    parser.add_argument("--de-agglomerate-particles", action="store_true")
+
+    # Mask 2: DoG
+    parser.add_argument("--high-precision-DoG", action="store_true")
+    parser.add_argument("--sigma1", type=float)
+    parser.add_argument("--sigma2", type=float)
+    parser.add_argument("--gamma", type=float)
+    parser.add_argument("--DoG-mask", choices=["Triangle", "Default"])
+
+    # Particle analysis
+    parser.add_argument("--exclude-edges", action="store_true")
+    parser.add_argument("--show-visualiser", action="store_true")
+
+    return parser.parse_args()
+
+
+def get_args():
+    args = get_CLI_args()
+
+    if args.procedure:
+        config = PRESETS[args.procedure]
+
+        for key, value in config.items():
+            current = getattr(args, key)
+            if current is None or current is False:
+                setattr(args, key, value)
+
+    return args
+
+
+PRESETS = {
+    "A": {
+        "scale": 0.31685,
+        "background": "black",
+        "rolling_ball": True,
+        "sliding": True,
+        "rolling_radius": 50,
+        "sigma1": 1,
+        "sigma2": 2,
+        "gamma": 0.9,
+        "DoG_mask": "Triangle",
+        "exclude_edges": True,
+    },
+    "C": {
+        "input_file": "09.jpg",
+        "input_dir": "microscope_images",
+        "output_dir": "outputs",
+        "scale": 2.155,
+        "colour": True,
+        "retinex": True,
+        "retinex_type": "Uniform",
+        "retinex_scale": 240,
+        "retinex_scale_division": 3,
+        "retinex_dynamic": 2.12,
+        "background": "white",
+        "rolling_ball": True,
+        "presmoothing": True,
+        "sliding": True,
+        "rolling_radius": 50,
+        "close_particles": True,
+        "fill_particles": True,
+        "de_agglomerate_particles": True,
+        "high_precision_DoG": True,
+        "sigma1": 1,
+        "sigma2": 2,
+        "gamma": 1,
+        "DoG_mask": "Default",
+        "exclude_edges": True,
+    },
+}
 
 
 def convert_numpy(obj):
@@ -46,56 +152,6 @@ def save_to_json(list_of_dicts, output_dir, name):
         json.dump(cleaned_dicts, f, indent=1)
 
 
-def identify_particles(rt, rois, scale, gateway):
-    particle_dicts = []
-    for i, roi in enumerate(rois):
-        area_px = rt.getValue("Area", i)
-        perimeter_px = rt.getValue("Perim.", i)
-        centroid_x = rt.getValue("X", i)
-        centroid_y = rt.getValue("Y", i)
-        bx = rt.getValue("BX", i)
-        by = rt.getValue("BY", i)
-        width = rt.getValue("Width", i)
-        height = rt.getValue("Height", i)
-        major = rt.getValue("Major", i)
-        minor = rt.getValue("Minor", i)
-
-        eccentricity = np.sqrt(1 - (minor / major) ** 2) if major > 0 else 0.0
-        area_um2 = area_px * (scale**2)
-        effective_diameter = np.sqrt(4 * area_um2 / np.pi)
-
-        # Pixel coordinates for this particle: crop mask + bounding box offset
-        roi_mask_np = gateway.py.from_java(roi.getMask())
-        bounds = roi.getBounds()
-        rows, cols = np.nonzero(roi_mask_np)
-        coords = [(int(r + bounds.y), int(c + bounds.x)) for r, c in zip(rows, cols)]
-
-        particle_dicts.append(
-            {
-                "label": i + 1,
-                "area_px": area_px,
-                "area_um2": area_um2,
-                "effective_diameter": effective_diameter,
-                "centroid": (
-                    centroid_y,
-                    centroid_x,
-                ),  # (row, col), matches regionprops convention
-                "perimeter_px": perimeter_px,
-                "eccentricity": eccentricity,
-                "major_axis_length": major,
-                "minor_axis_length": minor,
-                "bbox": (
-                    by,
-                    bx,
-                    by + height,
-                    bx + width,
-                ),  # (min_row, min_col, max_row, max_col)
-                "coords": coords,
-            }
-        )
-    return particle_dicts
-
-
 def identify_particles_from_mask(rt, mask, scale, exclude_edges=False):
     """Build particle records without ImageJ's GUI-only ROI Manager."""
     labels, count = ndimage.label(mask > 0, structure=np.ones((3, 3), dtype=int))
@@ -123,15 +179,16 @@ def identify_particles_from_mask(rt, mask, scale, exclude_edges=False):
         result_index = len(particle_dicts)
         area_px = rt.getValue("Area", result_index)
         perimeter_px = rt.getValue("Perim.", result_index)
-        centroid_x = rt.getValue("X", result_index)
-        centroid_y = rt.getValue("Y", result_index)
-        bx = rt.getValue("BX", result_index)
-        by = rt.getValue("BY", result_index)
-        particle_width = rt.getValue("Width", result_index)
-        particle_height = rt.getValue("Height", result_index)
-        major = rt.getValue("Major", result_index)
-        minor = rt.getValue("Minor", result_index)
-        eccentricity = np.sqrt(1 - (minor / major) ** 2) if major > 0 else 0.0
+        centroid_x_px = rt.getValue("X", result_index)
+        centroid_y_px = rt.getValue("Y", result_index)
+        bx_px = rt.getValue("BX", result_index)  # top left coordinates of bounding box
+        by_px = rt.getValue("BY", result_index)  # "              "               "
+        particle_width_px = rt.getValue("Width", result_index)
+        particle_height_px = rt.getValue("Height", result_index)
+        major_um = rt.getValue("Major", result_index)
+        minor_um = rt.getValue("Minor", result_index)
+        eccentricity = np.sqrt(1 - (minor_um / major_um) ** 2) if major_um > 0 else 0.0
+        spheroid_volume_um3 = 4 / 3 * np.pi * (minor_um**2) * major_um
         area_um2 = area_px * (scale**2)
 
         particle_dicts.append(
@@ -139,23 +196,35 @@ def identify_particles_from_mask(rt, mask, scale, exclude_edges=False):
                 "label": result_index + 1,
                 "area_px": area_px,
                 "area_um2": area_um2,
-                "effective_diameter": np.sqrt(4 * area_um2 / np.pi),
-                "centroid": (centroid_y, centroid_x),
+                "effective_diameter_um": np.sqrt(4 * area_um2 / np.pi),
+                "centroid_px": (centroid_y_px, centroid_x_px),
                 "perimeter_px": perimeter_px,
                 "eccentricity": eccentricity,
-                "major_axis_length": major,
-                "minor_axis_length": minor,
-                "bbox": (
-                    by,
-                    bx,
-                    by + particle_height,
-                    bx + particle_width,
+                "major_axis_length_um": major_um,
+                "minor_axis_length_um": minor_um,
+                "spheroid_volume_um3": spheroid_volume_um3,
+                "bbox_px": (
+                    by_px,
+                    bx_px,
+                    by_px + particle_height_px,
+                    bx_px + particle_width_px,
                 ),
                 "coords": coords,
             }
         )
 
     return particle_dicts
+
+
+def soiling_info(particle_dicts):
+    soil_volume_um3 = 0
+    soil_area_um2 = 0
+
+    for particle in particle_dicts:
+        soil_volume_um3 = soil_volume_um3 + particle["spheroid_volume_um3"]
+        soil_area_um2 = soil_area_um2 + particle["area_um2"]
+    soiling_data = {"soil_volume_um3": soil_volume_um3, "soil_area_um2": soil_area_um2}
+    return soiling_data
 
 
 def colourful_particle_map(particle_list, mask):
