@@ -1,8 +1,4 @@
-Cython==3.3.0
-matplotlib==3.11.1
-numpy==2.5.2
-opencv_python==5.0.0.93
+matplotlib==3.11.2
+numpy==2.5.3
 pyimagej==1.8.0
-scipy==1.18.1
 scyjava==1.12.5
-skimage==0.0
