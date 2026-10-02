@@ -5,8 +5,66 @@ from matplotlib import pyplot as plt
 from matplotlib.widgets import Slider
 import argparse
 
+""" Define the file suffixes that we allow
+
+    Self-explanatory
+"""
+IMAGE_SUFFIXES = {".bmp", ".jpg", ".jpeg", ".png", ".tif", ".tiff"}
+
+""" Define the presets the user can optionally choose from
+
+    Presets A and C replicate the procedures used in the round-robin.
+"""
+
+PRESETS = {
+    "A": {
+        "scale": 1 / 3.156,
+        "background": "black",
+        "rolling_ball": True,
+        "sliding": True,
+        "rolling_radius": 50,
+        "sigma1": 1,
+        "sigma2": 2,
+        "gamma": 0.9,
+        "DoG_mask": "Triangle",
+        "exclude_edges": True,
+    },
+    "C": {
+        "input_file": "09.jpg",
+        "input_dir": "microscope_images",
+        "output_dir": "outputs",
+        "scale": 1 / 0.464,
+        "colour": True,
+        "retinex": True,
+        "retinex_type": "Uniform",
+        "retinex_scale": 240,
+        "retinex_scale_division": 3,
+        "retinex_dynamic": 2.12,
+        "background": "white",
+        "rolling_ball": True,
+        "presmoothing": True,
+        "sliding": True,
+        "rolling_radius": 50,
+        "close_particles": True,
+        "fill_particles": True,
+        "de_agglomerate_particles": True,
+        "high_precision_DoG": True,
+        "sigma1": 1,
+        "sigma2": 2,
+        "gamma": 1,
+        "DoG_mask": "Default",
+        "exclude_edges": True,
+    },
+}
+
 
 def get_CLI_args():
+    """Parse Command line arguments.
+
+    Returns a namespace item containing CLIs
+
+    """
+
     parser = argparse.ArgumentParser()
 
     #### PRESETS ####
@@ -56,6 +114,13 @@ def get_CLI_args():
 
 
 def get_args():
+    """Obtain the command line arguments and handle presets
+
+    If no preset is specified, return args as returned by get_CLI_args(). If a preset is
+    specified, check each argument for whether its been manually set. If not, set it to the
+    value defined in the corresponding entry in PRESETS. This lets users choose a preset and
+    deviate from it where desired.
+    """
     args = get_CLI_args()
 
     if args.procedure:
@@ -69,52 +134,13 @@ def get_args():
     return args
 
 
-PRESETS = {
-    "A": {
-        "scale": 0.31685,
-        "background": "black",
-        "rolling_ball": True,
-        "sliding": True,
-        "rolling_radius": 50,
-        "sigma1": 1,
-        "sigma2": 2,
-        "gamma": 0.9,
-        "DoG_mask": "Triangle",
-        "exclude_edges": True,
-    },
-    "C": {
-        "input_file": "09.jpg",
-        "input_dir": "microscope_images",
-        "output_dir": "outputs",
-        "scale": 2.155,
-        "colour": True,
-        "retinex": True,
-        "retinex_type": "Uniform",
-        "retinex_scale": 240,
-        "retinex_scale_division": 3,
-        "retinex_dynamic": 2.12,
-        "background": "white",
-        "rolling_ball": True,
-        "presmoothing": True,
-        "sliding": True,
-        "rolling_radius": 50,
-        "close_particles": True,
-        "fill_particles": True,
-        "de_agglomerate_particles": True,
-        "high_precision_DoG": True,
-        "sigma1": 1,
-        "sigma2": 2,
-        "gamma": 1,
-        "DoG_mask": "Default",
-        "exclude_edges": True,
-    },
-}
-
-
-IMAGE_SUFFIXES = {".bmp", ".jpg", ".jpeg", ".png", ".tif", ".tiff"}
-
-
 def get_files(dir):
+    """Returns a list of file names in a directory
+
+    Used to obtain the name of each image to be processed when a specific file name is not
+    provided by the user.
+
+    """
 
     return [
         f.name
@@ -124,6 +150,11 @@ def get_files(dir):
 
 
 def convert_numpy(obj):
+    """Convert NumPy objects to native Python
+
+    Lets us save things to jsons.
+    """
+
     # Convert numpy scalars
     if isinstance(obj, (np.integer, np.floating)):
         return obj.item()
@@ -144,7 +175,13 @@ def convert_numpy(obj):
     return obj
 
 
+###################################################################################################
 def save_to_json(list_of_dicts, output_dir, name):
+    """Save a list of dicts to a json in a given directory
+
+    Converts a list of dictionaries with numpy elements to native Python. Then saves the resulting
+    dictionary to the specified output directory with the specified name.
+    """
 
     # Root directory where this script lives
     Path(output_dir).mkdir(parents=True, exist_ok=True)
@@ -159,21 +196,46 @@ def save_to_json(list_of_dicts, output_dir, name):
         json.dump(cleaned_dicts, f, indent=1)
 
 
+###################################################################################################
 def particles_from_imagej(rt, labels, scale):
-    """Build particle records from an ImageJ results table and its count-mask image."""
+    """Construct a list of particles and their traits
+
+    Extracts properties of each particle from the results table produced by ImageJ's particle
+    analyzer. Computes some additional properties based on this information.
+
+    Returns a list of dictionaries; each dictionary contains the properties of a single particle.
+
+    """
+
     n = rt.size()
 
     # Group pixel coordinates by label in one pass (avoids n full-image scans)
+    # Turn the 2d array into a 1d array
     flat = labels.ravel()
+
+    # Get the indices of the values that would produce a sorted list (sort the values, but store their indices in 'flat', not their values)
     order = np.argsort(flat, kind="stable")
+
+    # Now sort 'flat' using this array of indices
     sorted_labels = flat[order]
+
+    # Find the location of the beginning of each particle [1, 1, 1, **2**, 2, 2, 2, **3**, 3, ....] -> [0, 3, 7, ...]
+    # n + 2 ensures that the last particle has an end marker that can be used.
     starts = np.searchsorted(sorted_labels, np.arange(1, n + 2))
+
     width = labels.shape[1]
 
     particle_dicts = []
     for i in range(n):
+
+        # Labels should start from 1, but "for i in range(n)" starts from 0"
         label = i + 1
+
+        # Slice 'order' using bound from 'starts' to isolate a single particle.
         idx = order[starts[i] : starts[i + 1]]
+
+        # For every index, the corresponding row is the index divided by the number of columns per row, rounded down.
+        # The corresponding column is the index modulo the number of columns per row.
         coords = [(int(p // width), int(p % width)) for p in idx]
 
         area_px = rt.getValue("Area", i)
@@ -214,6 +276,19 @@ def particles_from_imagej(rt, labels, scale):
 
 
 def soiling_info(particle_dicts, dimensions, um_per_px):
+    """Provides a basic estimation of area and volume soiling.
+
+    Takes a list of dictionaries (one for each particle) and the dimension and scale of the image.
+    Area is basic coverage per particle. This is NOT related to reflectance lost; second-surface
+    and homogeneity/non-homogeneity assumptions, scattering etc. are all downstream. Any actual
+    analysis should replace this function.
+
+    Prints the volume in cubic microns and area in square microns, as well as proportional coverage
+    and volume (cubic microns) per square metre of reflector to a json. Note that proportional
+    coverage is only meaningful if edge-particles are NOT omitted (since omitting them means that
+    covered area is flagged as being clear).
+    """
+
     nrows = dimensions[0]
     ncols = dimensions[1]
 
@@ -240,27 +315,8 @@ def soiling_info(particle_dicts, dimensions, um_per_px):
 def colourful_particle_map(labels):
     """Generate a map of particles with different colours.
 
-    Args:
-        particle_list (list[dict]): One dict per particle, each containing:
-            - 'coords' (list[tuple]): Pixel coordinates as (row, col) tuples.
-            - 'centroid' (tuple[float, float]): (x, y) position in µm.
-            - 'effective_diameter' (float): Diameter of equivalent circle in µm.
-            - 'major_axis' (float): Major axis length of fitted ellipse in µm.
-            - 'minor_axis' (float): Minor axis length of fitted ellipse in µm.
-            - 'orientation' (float): Angle of major axis in radians.
-            - 'pixel_count' (int): Number of pixels in the particle.
-            - 'area' (float): Particle area in µm².
-            - 'outline_coords' (None): Reserved for future ellipse fitting.
-            - 'circumference' (None): Reserved for future ellipse fitting.
-            - 'corrected_diameter' (None): Reserved for future ellipse fitting.
-            - 'corrected_area' (None): Reserved for future ellipse fitting.
-        mask (np.ndarray): Boolean mask where True indicates the presence of soiling
-
-    Returns:
-        map (np.ndarray): RGBA image of shape (H, W, 4) and dtype uint8, where each
-            particle is coloured from a series of 6 different colours and unpopulated
-            pixels are transparent (alpha = 0).
-
+    Produces a map that's used to visualise the particles. The argument is the labelled particle
+    mask. Returns an RGBA image with the same 2d dimensions as the input.
     """
 
     # Define RGB colour options. Last one is tranparency
@@ -296,31 +352,15 @@ def colourful_particle_map(labels):
     return map
 
 
-# Overlay this on the microscope image for comparison
+###################################################################################################
 def show_overlay(microscope_img, labels):
-    """Generate a figure which overlays particles on a chosen image.
+    """Generate an interactive overlay of the particle map over an image.
 
-    Args:
-        microscope_img (np.ndarray): uint8 greyscale array which has particles drawn over it.
-        mask (np.ndarray): Boolean array where True inidcates the presence of soiling.
-        particle_list (list[dict]): One dict per particle, each containing:
-            - 'coords' (list[tuple]): Pixel coordinates as (row, col) tuples.
-            - 'centroid' (tuple[float, float]): (x, y) position in µm.
-            - 'effective_diameter' (float): Diameter of equivalent circle in µm.
-            - 'major_axis' (float): Major axis length of fitted ellipse in µm.
-            - 'minor_axis' (float): Minor axis length of fitted ellipse in µm.
-            - 'orientation' (float): Angle of major axis in radians.
-            - 'pixel_count' (int): Number of pixels in the particle.
-            - 'area' (float): Particle area in µm².
-            - 'outline_coords' (None): Reserved for future ellipse fitting.
-            - 'circumference' (None): Reserved for future ellipse fitting.
-            - 'corrected_diameter' (None): Reserved for future ellipse fitting.
-            - 'corrected_area' (None): Reserved for future ellipse fitting.
-
-    Displays:
-        Matplotlib figure with the greyscale microscope image overlaid with a coloured RGBA
-            particle map and an opacity slider.
-
+    Takes an image (the original microscope image is used normally) and a labelled particle mask.
+    Uses colourful_particle_map to turn the laelled particle mask into an RGBA image and overlays
+    this on the image input. Produces an interactive figure which lets the user change the alpha
+    values (transparency) of the particles, and zoom in/out. Re-renders everything with every
+    change, so can get slow for large images.
     """
 
     fig, ax = plt.subplots()
