@@ -1,0 +1,47 @@
+The image processing procedures use a command line interface. A series of arguments must be passed-
+see the comments at the top of image_processing_procedures.py for more information, including
+examples.
+
+One of the required arguments is the directory where you have installed FIJI.app. You
+must install Fiji so that you can access ImageJ since this process relies on running ImageJ using
+Java locally. This means you must also run Java.
+
+It may be possible to run things online using Maven and avoid a local Fiji install, but I couldn't
+get this working. Hence why I've made this all dependent on a Fiji install.
+
+I do not know if this works for mac or linux. It should work for Windows 11 as of September 2026.
+
+1.  Install Java 11 (Azul Zulu 11.XX.XXX) from https://www.azul.com/downloads/?package=jdk#zulu
+
+2.  Extract it to somewhere permanent, e.g. C:\Program Files\Zulu\zulu-11
+
+3.  Make sure that you have the filepath zulu-11\bin\java.exe
+
+4.  Download maven from https://maven.apache.org/download.cgi. I downloaded 3.9.X, now 3.10.X is
+    out. It shouldn't matter. This may be unnecessary.
+
+5.  Extract it to somewhere permanent, e.g. C:\Program Files\Apache\maven
+
+6.  Make sure that you have the filepath maven\bin\mvn.cmd
+
+7.  Edit your system environmental variables. Edit the system environment variables -> Environment
+    Variables -> System variables. Set JAVA_HOME to your zulu directory from before. Using the same
+    example as before it would be C:\Program Files\Zulu\zulu-11. Set MAVEN_HOME to your maven
+    directory from before. Using the same example as before, it would be
+     C:\Program Files\Apache\maven
+
+8.   Add these to Path: %JAVA_HOME%\bin , %MAVEN_HOME%\bin
+
+9.  Check that that's all working by opening a terminal and running "java -version". You should get
+     11.X.X. Then run "mvn -version". It should also say that you're using Java 11.
+
+10. Download and install Fiji from https://imagej.net/software/fiji/downloads. Version shouldn't
+    matter, just whatever's Windows 64 bit.
+
+11. Make sure that the path Fiji.app\ImageJ-win64.exe exists. Write down the path to get there,
+    e.g. C:\Users\Me\Fiji.app. This is vital.
+
+12. Make sure that your venv has all of the required modules installed, including pyimagej. If you
+    get an error like "jar tool not found at ...cjdk\cache...jre...bin\jar.exe" it's caused by the
+    pyimagej install also installing its own Java runtime instead of using the one we installed.
+    Stick this in the terminal to fix it: $env:JAVA_HOME = "C:\Program Files\Zulu\zulu-11"
