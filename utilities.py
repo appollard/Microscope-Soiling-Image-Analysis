@@ -1,7 +1,6 @@
 from pathlib import Path
 import json
 import numpy as np
-from scipy import ndimage
 from matplotlib import pyplot as plt
 from matplotlib.widgets import Slider
 import argparse
@@ -18,7 +17,7 @@ def get_CLI_args():
     parser.add_argument("--fiji-dir", default=r"C:\Users\snare\Fiji.app")
 
     # Setup
-    parser.add_argument("--input-file", required=True)
+    parser.add_argument("--input-file")
     parser.add_argument("--input-dir", default="microscope_images")
     parser.add_argument("--output-dir", default="outputs")
     parser.add_argument("--scale", type=float)
@@ -112,6 +111,18 @@ PRESETS = {
 }
 
 
+IMAGE_SUFFIXES = {".bmp", ".jpg", ".jpeg", ".png", ".tif", ".tiff"}
+
+
+def get_files(dir):
+
+    return [
+        f.name
+        for f in Path(dir).iterdir()
+        if f.is_file() and f.suffix.lower() in IMAGE_SUFFIXES
+    ]
+
+
 def convert_numpy(obj):
     # Convert numpy scalars
     if isinstance(obj, (np.integer, np.floating)):
@@ -136,14 +147,10 @@ def convert_numpy(obj):
 def save_to_json(list_of_dicts, output_dir, name):
 
     # Root directory where this script lives
-    root_dir = Path(__file__).parent
-
-    # Folder inside the root directory
-    save_dir = root_dir / output_dir
-    save_dir.mkdir(exist_ok=True)
+    Path(output_dir).mkdir(parents=True, exist_ok=True)
 
     # Full path to the output file
-    output_path = save_dir / name
+    output_path = Path(output_dir) / name
 
     # Convert non-native types to native Python
     cleaned_dicts = convert_numpy(list_of_dicts)
@@ -152,82 +159,85 @@ def save_to_json(list_of_dicts, output_dir, name):
         json.dump(cleaned_dicts, f, indent=1)
 
 
-def identify_particles_from_mask(rt, mask, scale, exclude_edges=False):
-    """Build particle records without ImageJ's GUI-only ROI Manager."""
-    labels, count = ndimage.label(mask > 0, structure=np.ones((3, 3), dtype=int))
-    objects = ndimage.find_objects(labels)
+def particles_from_imagej(rt, labels, scale):
+    """Build particle records from an ImageJ results table and its count-mask image."""
+    n = rt.size()
+
+    # Group pixel coordinates by label in one pass (avoids n full-image scans)
+    flat = labels.ravel()
+    order = np.argsort(flat, kind="stable")
+    sorted_labels = flat[order]
+    starts = np.searchsorted(sorted_labels, np.arange(1, n + 2))
+    width = labels.shape[1]
+
     particle_dicts = []
-    height, width = mask.shape
+    for i in range(n):
+        label = i + 1
+        idx = order[starts[i] : starts[i + 1]]
+        coords = [(int(p // width), int(p % width)) for p in idx]
 
-    for label, bounds in enumerate(objects, start=1):
-        if bounds is None:
-            continue
-        row_slice, col_slice = bounds
-        if exclude_edges and (
-            row_slice.start == 0
-            or col_slice.start == 0
-            or row_slice.stop == height
-            or col_slice.stop == width
-        ):
-            continue
+        area_px = rt.getValue("Area", i)
+        bx = rt.getValue("BX", i)
+        by = rt.getValue("BY", i)
+        w = rt.getValue("Width", i)
+        h = rt.getValue("Height", i)
 
-        rows, cols = np.nonzero(labels[bounds] == label)
-        coords = [
-            (int(row + row_slice.start), int(col + col_slice.start))
-            for row, col in zip(rows, cols)
-        ]
-        result_index = len(particle_dicts)
-        area_px = rt.getValue("Area", result_index)
-        perimeter_px = rt.getValue("Perim.", result_index)
-        centroid_x_px = rt.getValue("X", result_index)
-        centroid_y_px = rt.getValue("Y", result_index)
-        bx_px = rt.getValue("BX", result_index)  # top left coordinates of bounding box
-        by_px = rt.getValue("BY", result_index)  # "              "               "
-        particle_width_px = rt.getValue("Width", result_index)
-        particle_height_px = rt.getValue("Height", result_index)
-        major_um = rt.getValue("Major", result_index)
-        minor_um = rt.getValue("Minor", result_index)
-        eccentricity = np.sqrt(1 - (minor_um / major_um) ** 2) if major_um > 0 else 0.0
-        spheroid_volume_um3 = 4 / 3 * np.pi * (minor_um**2) * major_um
-        area_um2 = area_px * (scale**2)
+        # Ellipse axes come back in pixels because the image scale is pixels
+        major_px = rt.getValue("Major", i)
+        minor_px = rt.getValue("Minor", i)
+        major_um = major_px * scale  # Major/minor axes are full, not semi.
+        minor_um = minor_px * scale
+        eccentricity = np.sqrt(1 - (minor_px / major_px) ** 2) if major_px > 0 else 0.0
+        area_um2 = area_px * scale**2
 
         particle_dicts.append(
             {
-                "label": result_index + 1,
+                "label": label,
                 "area_px": area_px,
                 "area_um2": area_um2,
                 "effective_diameter_um": np.sqrt(4 * area_um2 / np.pi),
-                "centroid_px": (centroid_y_px, centroid_x_px),
-                "perimeter_px": perimeter_px,
+                "centroid_px": (rt.getValue("Y", i), rt.getValue("X", i)),
+                "perimeter_px": rt.getValue("Perim.", i),
                 "eccentricity": eccentricity,
                 "major_axis_length_um": major_um,
                 "minor_axis_length_um": minor_um,
-                "spheroid_volume_um3": spheroid_volume_um3,
-                "bbox_px": (
-                    by_px,
-                    bx_px,
-                    by_px + particle_height_px,
-                    bx_px + particle_width_px,
-                ),
+                "spheroid_volume_um3": 4
+                / 3
+                * np.pi
+                * (minor_um / 2) ** 2
+                * (major_um / 2),
+                "bbox_px": (by, bx, by + h, bx + w),
                 "coords": coords,
             }
         )
-
     return particle_dicts
 
 
-def soiling_info(particle_dicts):
+def soiling_info(particle_dicts, dimensions, um_per_px):
+    nrows = dimensions[0]
+    ncols = dimensions[1]
+
+    canvas_area_um2 = nrows * ncols * (um_per_px**2)
+
     soil_volume_um3 = 0
     soil_area_um2 = 0
 
     for particle in particle_dicts:
         soil_volume_um3 = soil_volume_um3 + particle["spheroid_volume_um3"]
         soil_area_um2 = soil_area_um2 + particle["area_um2"]
-    soiling_data = {"soil_volume_um3": soil_volume_um3, "soil_area_um2": soil_area_um2}
+
+    soil_area_coverage = soil_area_um2 / canvas_area_um2
+    soil_volume_um3_per_m2 = soil_volume_um3 / canvas_area_um2 * (1e6**2)
+    soiling_data = {
+        "soil_volume_um3": soil_volume_um3,
+        "soil_area_um2": soil_area_um2,
+        "soil_area_coverage_decimal": soil_area_coverage,
+        "soil_volume_um3_per_m2": soil_volume_um3_per_m2,
+    }
     return soiling_data
 
 
-def colourful_particle_map(particle_list, mask):
+def colourful_particle_map(labels):
     """Generate a map of particles with different colours.
 
     Args:
@@ -273,19 +283,21 @@ def colourful_particle_map(particle_list, mask):
     )
 
     # Define the map
-    # + (3,) gives the tensor a depth of 4: 3 for RGB and 1 for transparency
+    # + (4,) gives the tensor a depth of 4: 3 for RGB and 1 for transparency
     # (default is 0 for transparent canvas, changes to 1 when colour is assigned)
-    map = np.zeros((mask.shape + (4,)), dtype=np.uint8)
+    map = np.zeros((labels.shape + (4,)), dtype=np.uint8)
 
-    for i in range(len(particle_list)):  # For each particle
-        col = colours[i % len(colours)]  # Itterate through the colours
-        for j in range(len(particle_list[i]["coords"])):
-            map[particle_list[i]["coords"][j]] = col  # Sets the colour of the pixel
+    # Obtain each pixel which is part of a particle
+    mask = labels > 0
+
+    # Set each entry in map which corresponds to a pixel flagged in the mask to a value in colours determined by the value of the particle the pixel belongs to
+    map[mask] = colours[labels[mask] % len(colours)]
+
     return map
 
 
 # Overlay this on the microscope image for comparison
-def show_overlay(microscope_img, mask, particle_list):
+def show_overlay(microscope_img, labels):
     """Generate a figure which overlays particles on a chosen image.
 
     Args:
@@ -318,7 +330,7 @@ def show_overlay(microscope_img, mask, particle_list):
     ax.imshow(microscope_img, cmap="gray", vmin=0, vmax=255)  # Assumes uint8
 
     # Generate the map using the particle list
-    map = colourful_particle_map(particle_list, mask)
+    map = colourful_particle_map(labels)
 
     # Show the map
     map_overlay = ax.imshow(map, alpha=0.4)
