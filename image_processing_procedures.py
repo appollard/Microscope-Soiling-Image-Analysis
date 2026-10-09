@@ -27,17 +27,15 @@
 # --fiji-dir "C:\Users\snare\Fiji.app"  --input-file "09.jpg" --input-dir "microscope_images" --output-dir "outputs" --scale 2.155  --colour --retinex --retinex-type "Uniform" --retinex-scale 240 --retinex-scale-division 3 --retinex-dynamic 2.12 --background "white" --rolling-ball --presmoothing --sliding --rolling-radius 50 --close-particles --fill-particles --de-agglomerate-particles --high-precision-DoG --sigma1 1 --sigma2 2 --gamma 1 --DoG-mask "Default" --exclude-edges --show-visualiser
 
 
-# Import modules ##################################################################################
+# Import modules
 import os
 import utilities as ut
 from scyjava import jimport
 from pathlib import Path
 import numpy as np
 
-###################################################################################################
 
-
-# Define each stage ###############################################################################
+# Define each stage
 class PreprocessingStage:
     """Stage that takes Java ij.IJ class, command line arguments and a raw image and conducts
         image preprocessing.
@@ -390,7 +388,8 @@ class Visualisation:
              Assigns the Java class, command line arguments and ImageJ gateway to the self
              entity so that they may be accessed by run().
          run:
-             Shows an overlay of the particles identified over the original image
+             Shows an overlay of the particles identified over the original image. Saves this as
+             an image for later reference
     """
 
     def __init__(self, args, gateway):
@@ -401,8 +400,8 @@ class Visualisation:
 
         # Show visualiser
         if self.args.show_visualiser:
-            original_np = self.gateway.py.from_java(original_image)
-            ut.show_overlay(original_np, labels)
+            original_np = np.asarray(self.gateway.py.from_java(original_image))
+            ut.show_overlay(original_np, labels, self.args)
 
 
 def main():

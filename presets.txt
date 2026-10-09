@@ -1,0 +1,4 @@
+Procedure C with scale of 0.17um/px on all items in folder "test_real_imgs"
+
+--fiji-dir "C:\Users\[!!!!!!]\Fiji.app" --input-dir "test_real_imgs"  --output-dir "outputs" --scale 0.17  --colour --retinex --retinex-type "Uniform" --retinex-scale 240 --retinex-scale-division 3 --retinex-dynamic 2.12 --background "white" --rolling-ball --presmoothing --sliding --rolling-radius 50 --close-particles --fill-particles --de-agglomerate-particles --high-precision-DoG --sigma1 1 --sigma2 2 --gamma 1 --DoG-mask "Default" --exclude-edges --show-visualiser
+
