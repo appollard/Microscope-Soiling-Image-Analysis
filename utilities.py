@@ -1,8 +1,10 @@
 from pathlib import Path
 import json
 import numpy as np
-from matplotlib import pyplot as plt
+import matplotlib.pyplot as plt
 from matplotlib.widgets import Slider
+from PIL import Image
+import os
 import argparse
 
 """ Define the file suffixes that we allow
@@ -30,9 +32,6 @@ PRESETS = {
         "exclude_edges": True,
     },
     "C": {
-        "input_file": "09.jpg",
-        "input_dir": "microscope_images",
-        "output_dir": "outputs",
         "scale": 1 / 0.464,
         "colour": True,
         "retinex": True,
@@ -72,11 +71,11 @@ def get_CLI_args():
 
     #### RAW VARIABLES ####
     # Misc
-    parser.add_argument("--fiji-dir", default=r"C:\Users\snare\Fiji.app")
+    parser.add_argument("--fiji-dir", type=str)
 
     # Setup
     parser.add_argument("--input-file")
-    parser.add_argument("--input-dir", default="microscope_images")
+    parser.add_argument("--input-dir", type=str)
     parser.add_argument("--output-dir", default="outputs")
     parser.add_argument("--scale", type=float)
 
@@ -103,12 +102,13 @@ def get_CLI_args():
     parser.add_argument("--high-precision-DoG", action="store_true")
     parser.add_argument("--sigma1", type=float)
     parser.add_argument("--sigma2", type=float)
-    parser.add_argument("--gamma", type=float)
+    parser.add_argument("--gamma", type=float, default=1)
     parser.add_argument("--DoG-mask", choices=["Triangle", "Default"])
 
     # Particle analysis
     parser.add_argument("--exclude-edges", action="store_true")
     parser.add_argument("--show-visualiser", action="store_true")
+    parser.add_argument("--give_diameters", action="store_true")
 
     return parser.parse_args()
 
@@ -175,7 +175,6 @@ def convert_numpy(obj):
     return obj
 
 
-###################################################################################################
 def save_to_json(list_of_dicts, output_dir, name):
     """Save a list of dicts to a json in a given directory
 
@@ -196,7 +195,6 @@ def save_to_json(list_of_dicts, output_dir, name):
         json.dump(cleaned_dicts, f, indent=1)
 
 
-###################################################################################################
 def particles_from_imagej(rt, labels, scale):
     """Construct a list of particles and their traits
 
@@ -209,69 +207,52 @@ def particles_from_imagej(rt, labels, scale):
 
     n = rt.size()
 
-    # Group pixel coordinates by label in one pass (avoids n full-image scans)
-    # Turn the 2d array into a 1d array
-    flat = labels.ravel()
+    # Define a function to retrieve entire column from the results table
+    def col(name):
+        return np.asarray(rt.getColumnAsDoubles(rt.getColumnIndex(name)))
 
-    # Get the indices of the values that would produce a sorted list (sort the values, but store their indices in 'flat', not their values)
-    order = np.argsort(flat, kind="stable")
+    # Extract info for all aprticles
+    area_px = col("Area")
+    perimeter_px = col("Perim.")
+    bx = col("BX")
+    by = col("BY")
+    w = col("Width")
+    h = col("Height")
+    centroid_x = col("X")
+    centroid_y = col("Y")
 
-    # Now sort 'flat' using this array of indices
-    sorted_labels = flat[order]
-
-    # Find the location of the beginning of each particle [1, 1, 1, **2**, 2, 2, 2, **3**, 3, ....] -> [0, 3, 7, ...]
-    # n + 2 ensures that the last particle has an end marker that can be used.
-    starts = np.searchsorted(sorted_labels, np.arange(1, n + 2))
-
-    width = labels.shape[1]
+    # Ellipse axes come back in pixels because the image scale is pixels
+    major_px = col("Major")
+    minor_px = col("Minor")
+    major_um = major_px * scale  # Major/minor axes are full, not semi.
+    minor_um = minor_px * scale
+    area_um2 = area_px * scale**2
+    ratio = np.divide(
+        minor_px, major_px, out=np.ones_like(minor_px), where=major_px > 0
+    )
+    eccentricity = np.sqrt(1 - ratio**2)
+    diameter = np.sqrt(4 * area_um2 / np.pi)
+    volume = 4 / 3 * np.pi * (minor_um / 2) ** 2 * (major_um / 2)
 
     particle_dicts = []
     for i in range(n):
 
-        # Labels should start from 1, but "for i in range(n)" starts from 0"
-        label = i + 1
-
-        # Slice 'order' using bound from 'starts' to isolate a single particle.
-        idx = order[starts[i] : starts[i + 1]]
-
-        # For every index, the corresponding row is the index divided by the number of columns per row, rounded down.
-        # The corresponding column is the index modulo the number of columns per row.
-        coords = [(int(p // width), int(p % width)) for p in idx]
-
-        area_px = rt.getValue("Area", i)
-        bx = rt.getValue("BX", i)
-        by = rt.getValue("BY", i)
-        w = rt.getValue("Width", i)
-        h = rt.getValue("Height", i)
-
-        # Ellipse axes come back in pixels because the image scale is pixels
-        major_px = rt.getValue("Major", i)
-        minor_px = rt.getValue("Minor", i)
-        major_um = major_px * scale  # Major/minor axes are full, not semi.
-        minor_um = minor_px * scale
-        eccentricity = np.sqrt(1 - (minor_px / major_px) ** 2) if major_px > 0 else 0.0
-        area_um2 = area_px * scale**2
-
         particle_dicts.append(
             {
-                "label": label,
-                "area_px": area_px,
-                "area_um2": area_um2,
-                "effective_diameter_um": np.sqrt(4 * area_um2 / np.pi),
-                "centroid_px": (rt.getValue("Y", i), rt.getValue("X", i)),
-                "perimeter_px": rt.getValue("Perim.", i),
-                "eccentricity": eccentricity,
-                "major_axis_length_um": major_um,
-                "minor_axis_length_um": minor_um,
-                "spheroid_volume_um3": 4
-                / 3
-                * np.pi
-                * (minor_um / 2) ** 2
-                * (major_um / 2),
-                "bbox_px": (by, bx, by + h, bx + w),
-                "coords": coords,
+                "label": i + 1,  # Labels start from 1, indexing starts from 0
+                "area_px": area_px[i],
+                "area_um2": area_um2[i],
+                "effective_diameter_um": diameter[i],
+                "centroid_px": (centroid_y[i], centroid_x[i]),
+                "perimeter_px": perimeter_px[i],
+                "eccentricity": eccentricity[i],
+                "major_axis_length_um": major_um[i],
+                "minor_axis_length_um": minor_um[i],
+                "spheroid_volume_um3": volume[i],
+                "bbox_px": (by[i], bx[i], by[i] + h[i], bx[i] + w[i]),
             }
         )
+
     return particle_dicts
 
 
@@ -312,11 +293,23 @@ def soiling_info(particle_dicts, dimensions, um_per_px):
     return soiling_data
 
 
-def colourful_particle_map(labels):
+def get_histogram(diameters, args):
+
+    plt.hist(diameters, bins=100)
+    plt.xlabel(r"Effective diameter ($\mu$m)")
+    plt.ylabel("Frequency")
+    plt.title("Histogram of Effective Particle Diameters")
+    plt.savefig(
+        os.path.join(args.output_dir, "Effective Diameters Histogram.png"), dpi=300
+    )
+    plt.close()
+
+
+def colourful_particle_map(labels, alpha):
     """Generate a map of particles with different colours.
 
-    Produces a map that's used to visualise the particles. The argument is the labelled particle
-    mask. Returns an RGBA image with the same 2d dimensions as the input.
+    Produces a map that's used to visualise the particles. The arguments are the labelled particle
+    mask and transparency of particles. Returns an RGBA image with the same 2d dimensions as the input.
     """
 
     # Define RGB colour options. Last one is tranparency
@@ -349,11 +342,14 @@ def colourful_particle_map(labels):
     # Set each entry in map which corresponds to a pixel flagged in the mask to a value in colours determined by the value of the particle the pixel belongs to
     map[mask] = colours[labels[mask] % len(colours)]
 
+    # Set the alpha
+    map[mask, 3] = int(round(alpha * 255))
+
     return map
 
 
 ###################################################################################################
-def show_overlay(microscope_img, labels):
+def show_overlay(microscope_img, labels, args):
     """Generate an interactive overlay of the particle map over an image.
 
     Takes an image (the original microscope image is used normally) and a labelled particle mask.
@@ -363,26 +359,36 @@ def show_overlay(microscope_img, labels):
     change, so can get slow for large images.
     """
 
-    fig, ax = plt.subplots()
-    plt.subplots_adjust(bottom=0.2)
+    # Generate the map using the particle list. Set the alpha of each particle to 0.4
+    map = colourful_particle_map(labels, 0.4)
 
-    # Show the original image
-    ax.imshow(microscope_img, cmap="gray", vmin=0, vmax=255)  # Assumes uint8
+    # Turn this into a picture to be saved to the output directory
+    background = Image.fromarray(microscope_img)
+    particle_map = Image.fromarray(map, "RGBA")
+    background = background.convert("RGB")
+    background.paste(particle_map, (0, 0), mask=particle_map)
+    background.save(os.path.join(args.output_dir, "Particle Map.png"))
 
-    # Generate the map using the particle list
-    map = colourful_particle_map(labels)
+    # Check for the show-visualiser flag
+    if args.show_visualiser:
 
-    # Show the map
-    map_overlay = ax.imshow(map, alpha=0.4)
+        fig, ax = plt.subplots()
+        plt.subplots_adjust(bottom=0.2)
 
-    # Slider to control map opacity
-    ax_slider = plt.axes([0.2, 0.05, 0.6, 0.03])
-    slider = Slider(ax_slider, "Mask opacity", 0.0, 1.0, valinit=0.4)
+        # Show the original image
+        ax.imshow(microscope_img, cmap="gray", vmin=0, vmax=255)  # Assumes uint8
 
-    def update(val):
-        map_overlay.set_alpha(slider.val)
-        fig.canvas.draw_idle()
+        # Show the map
+        map_overlay = ax.imshow(map)
 
-    slider.on_changed(update)
-    plt.show()
-    plt.close("all")
+        # Slider to control map opacity
+        ax_slider = plt.axes([0.2, 0.05, 0.6, 0.03])
+        slider = Slider(ax_slider, "Mask opacity", 0.0, 1.0, valinit=0.4)
+
+        def update(val):
+            map_overlay.set_alpha(slider.val)
+            fig.canvas.draw_idle()
+
+        slider.on_changed(update)
+        plt.show()
+        plt.close("all")

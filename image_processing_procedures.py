@@ -2,29 +2,10 @@
 # this is set to true if the command is included:
 
 # --fiji-dir [YOUR DIRECTORY FOR Fiji.app]  --input-file [IMAGE NAME] --input-dir [FOLDER IT'S IN] --output-dir [FOLDER TO SAVE THE OUTPUTS]
-# --scale [PIXEL SCALE] [--colour] [--retinex] --retinex-type [TYPE] --retinex-scale [SCALE] --retinex-scale-division [DIVS]
+# --scale [PIXEL SCALE (um/px)] [--colour] [--retinex] --retinex-type [TYPE] --retinex-scale [SCALE] --retinex-scale-division [DIVS]
 # --retinex-dynamic [DYNAMIC] --background [COLOUR] [--rolling-ball] [--presmoothing] [--sliding] --rolling-radius [RADIUS]
 # [--close-particles] [--fill-particles] [--de-agglomerate-particles] [--high-precision-DoG] --sigma1 [VAL] --sigma2 [VAL] --gamma [VAL] --DoG-mask [MASK TYPE]
 # [--exclude-edges] [--show-visualiser]
-
-
-# Procedure A Copy-paste for 01.bmp image (fill in your info):
-
-# --fiji-dir "[Fiji.app DIRECTORY]" --input-file "01.bmp" --input-dir "[ROOT DIRECTORY INPUT FOLDER]" --output-dir "[ROOT DIRECTORY OUTPUT FOLDER]" --scale 0.31685 --background "black" --rolling-ball --sliding --rolling-radius 50 --sigma1 1 --sigma2 2 --gamma 0.9 --DoG-mask "Triangle" --exclude-edges --show-visualiser
-
-# Procedure A Copy-paste examples (with and without preset):
-
-# --fiji-dir "C:\Users\snare\Fiji.app" --input-file "01.bmp" --input-dir "microscope_images" --output-dir "outputs" --show-visualiser --procedure A
-# --fiji-dir "C:\Users\snare\Fiji.app" --input-file "01.bmp" --input-dir "microscope_images" --output-dir "outputs" --scale 0.31685 --background "black" --rolling-ball --sliding --rolling-radius 50 --sigma1 1 --sigma2 2 --gamma 0.9 --DoG-mask "Triangle" --exclude-edges --show-visualiser
-
-
-# Procedure C Copy-paste for 09.jpg image (fill in your info):
-
-# --fiji-dir [Fiji.app DIRECTORY]  --input-file "09.jpg" --input-dir [ROOT DIRECTORY INPUT FOLDER] --output-dir [ROOT DIRECTORY OUTPUT FOLDER] --scale 2.155 --colour --retinex --retinex-type "Uniform" --retinex-scale 240 --retinex-scale-division 3 --retinex-dynamic 2.12 --background "white" --rolling-ball --presmoothing --sliding --rolling-radius 50 --close-particles --fill-particles --de-agglomerate-particles --high-precision-DoG --sigma1 1 --sigma2 2 --gamma 1 --DoG-mask "Default" --exclude-edges --show-visualiser
-
-# Procedure C Copy-paste example:
-
-# --fiji-dir "C:\Users\snare\Fiji.app"  --input-file "09.jpg" --input-dir "microscope_images" --output-dir "outputs" --scale 2.155  --colour --retinex --retinex-type "Uniform" --retinex-scale 240 --retinex-scale-division 3 --retinex-dynamic 2.12 --background "white" --rolling-ball --presmoothing --sliding --rolling-radius 50 --close-particles --fill-particles --de-agglomerate-particles --high-precision-DoG --sigma1 1 --sigma2 2 --gamma 1 --DoG-mask "Default" --exclude-edges --show-visualiser
 
 
 # Import modules
@@ -59,11 +40,6 @@ class PreprocessingStage:
 
     def run(self, microscope_img):
         img = microscope_img.duplicate()
-
-        # Set scale
-        self.IJ.run(
-            img, "Set Scale...", f"distance={self.args.scale} known=1 unit=mu.m"
-        )
 
         # Setup rolling ball smoothing string
         if self.args.rolling_ball:
@@ -148,6 +124,10 @@ class OtsuStage:
         # Get 8-bit otsu mask
         self.IJ.setAutoThreshold(img, otsu_str)
 
+        # Get otsu thresholds
+        ip = img.getProcessor()
+        thresholds = [ip.getMinThreshold(), ip.getMaxThreshold()]
+
         # Convert to boolean mask
         self.IJ.run(img, "Convert to Mask", "")
 
@@ -166,7 +146,7 @@ class OtsuStage:
         # Save mask image
         self.IJ.saveAs(img, "png", os.path.join(self.args.output_dir, "Otsu Mask"))
 
-        return img
+        return img, thresholds
 
 
 class DoGStage:
@@ -230,6 +210,10 @@ class DoGStage:
         # Get 8-bit DoG mask
         self.IJ.setAutoThreshold(img, DoG_str)
 
+        # Get DoG thresholds
+        ip = img.getProcessor()
+        thresholds = [ip.getMinThreshold(), ip.getMaxThreshold()]
+
         # Convert to boolean mask
         self.IJ.run(img, "Convert to Mask", "")
 
@@ -241,10 +225,9 @@ class DoGStage:
         # Save mask image
         self.IJ.saveAs(img, "png", os.path.join(self.args.output_dir, "DoG Mask"))
 
-        return img
+        return img, thresholds
 
 
-###################################################################################################
 class CombinationStage:
     """Stage that takes Java ij.IJ class, command line arguments, masks and produces combined
     mask.
@@ -287,7 +270,6 @@ class CombinationStage:
         return mask
 
 
-###################################################################################################
 class ParticleInfo:
     """Stage that takes Java ij.IJ class, command line arguments, ImageJ gateway and uses ImageJ-
        native particle analysis functions where possible, otherwise native Python, to identify
@@ -352,7 +334,7 @@ class ParticleInfo:
         # Convert mask to array- pixel value is either 0 (background) or the label of that particle.
         # 1 for the first particle, etc. etc.
         label_imp = analyzer.getOutputImage()
-        labels = np.asarray(self.gateway.py.from_java(label_imp)).astype(np.int64)
+        labels = np.asarray(self.gateway.py.from_java(label_imp)).astype(np.int32)
 
         # Identify particles from the mask using ImageJ for all particle analysis and Python for simple numerical calculations
         particle_dicts = ut.particles_from_imagej(
@@ -360,13 +342,12 @@ class ParticleInfo:
             labels,
             self.args.scale,
         )
-
-        # Alignment check: table rows and label image must agree
-        assert (
-            rt.size() == len(particle_dicts) == labels.max()
-        ), f"Mismatch: table={rt.size()}, labelled={len(particle_dicts)}, max label={labels.max()}"
-
         rt.reset()
+
+        # Save a histogram of particle sizes
+        ut.get_histogram(
+            [p["effective_diameter_um"] for p in particle_dicts], self.args
+        )
 
         # Save particle information to json
         ut.save_to_json(particle_dicts, self.args.output_dir, "Particle_info.json")
@@ -399,9 +380,8 @@ class Visualisation:
     def run(self, original_image, labels):
 
         # Show visualiser
-        if self.args.show_visualiser:
-            original_np = np.asarray(self.gateway.py.from_java(original_image))
-            ut.show_overlay(original_np, labels, self.args)
+        original_np = np.asarray(self.gateway.py.from_java(original_image))
+        ut.show_overlay(original_np, labels, self.args)
 
 
 def main():
@@ -440,11 +420,13 @@ def main():
         microscope_img = IJ.openImage(os.path.join(args.input_dir, filename))
 
         processed_img = preprocessing.run(microscope_img)
-        otsu_mask = otsu.run(processed_img)
-        DoG_mask = DoG.run(processed_img)
+        otsu_mask, otsu_threshs = otsu.run(processed_img)
+        DoG_mask, DoG_threshs = DoG.run(processed_img)
         combined_mask = combination.run([otsu_mask, DoG_mask])
         particle_dicts, labelled_particles = particle_info.run(combined_mask)
         visualiser.run(microscope_img, labelled_particles)
+
+        ut.save_to_json([otsu_threshs, DoG_threshs], args.output_dir, "Thresholds.json")
 
         # Close images
         processed_img.close()
