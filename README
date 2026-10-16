@@ -1,4 +1,12 @@
 ###################################################################################################
+INSTRUCTIONS FOR USE
+###################################################################################################
+The purpose of this is for you to be able to stick in an image or folder of images, and pull out
+some JSON files with soiling data, plus some pretty images for validation. See presets.txt for
+example CLI usages. See image_processing_procedures.py for a list of command line arguments, and
+see utilities.py for presets and more info on the CLI structure, and everything else.
+
+###################################################################################################
 SETUP
 ###################################################################################################
 
