@@ -1,6 +1,9 @@
 *__pycache__*
-microscope_images/*
 outputs/*
+People/
+test_real_imgs/
+Verification/
+Mahreen.py
 procedure_documentation/*
 *.pyc
 .venv/
