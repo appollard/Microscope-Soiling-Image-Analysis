@@ -1,3 +1,7 @@
+###################################################################################################
+SETUP
+###################################################################################################
+
 The image processing procedures use a command line interface. A series of arguments must be passed-
 see the comments at the top of image_processing_procedures.py for more information, including
 examples.
@@ -45,3 +49,78 @@ I do not know if this works for mac or linux. It should work for Windows 11 as o
     get an error like "jar tool not found at ...cjdk\cache...jre...bin\jar.exe" it's caused by the
     pyimagej install also installing its own Java runtime instead of using the one we installed.
     Stick this in the terminal to fix it: $env:JAVA_HOME = "C:\Program Files\Zulu\zulu-11"
+
+###################################################################################################
+OUTPUTS
+###################################################################################################
+The outputs of this proces are three JSON files- one with information about each particle, one with
+whole-of-image soiling information, and one with masking thresholds. Intermediary images are also
+produced.
+
+##########
+The particle information JSON contains the following data for every particle identified:
+
+label:
+A unique identifier for each particle, starting at 1 for the first particle in the list.
+
+area_px:
+The number of pixels that constitute the particle, as identified from the mask using 8-neighbour
+connectivity.
+
+area_um2:
+Directly proportional to the area in pixels- number of pixels multiplied by the square of the
+microns-per-pixel scale of the image.
+
+effective_diameter_um2:
+Directly proportional to the square root of the area_um2 of the particle- converted using
+A=pi*(d/2)**2.
+
+centroid_px:
+Tuple (row, col) of the coordinate that the centroid of the particle is located at.
+
+perimeter_px:
+The approximate perimeter of the particle, measured as number of edges less (2-sqrt(2)) for each
+non-adjacent corner. See https://imagejdocu.list.lu/faq/technical/what_are_the_algorithms_used_to_calculate_particle_area_and_perimeter
+
+eccentricity:
+Eccentricity of the ellipse that best represents the particle. sqrt(1-(min_ax/maj_ax)**2)
+
+major_axis_length_um:
+Major axis of the best-fitting ellipse. Source code:
+https://github.com/imagej/ImageJ/blob/master/ij/process/EllipseFitter.java
+
+minor_axis_len_um:
+Minor axis of the best-fitting ellipse. Source code:
+https://github.com/imagej/ImageJ/blob/master/ij/process/EllipseFitter.java
+
+spheroid_volume_um3:
+Calculates volume of a spheroid using the minor and major axes. 
+
+bbox_px:
+Tuple (min_row, min_col, max_row, max_col) that bounds the particle.
+
+##########
+The whole-of-image soiling JSON contains the following data:
+
+soil_volume_um3:
+Sum of the spheroid volume of each particle.
+
+soil_area_um2:
+Sum of the area of each particle
+
+soil_area_coverage_decimal:
+Sum of the area of each particle over total canvas area
+
+soil_volume_um3_per_m2:
+Soil volume divided by 1 square metre
+
+##########
+The thresholds JSON contains a list of lists of threshold values. Each list belongs to one mask and
+contains the upper and lower threshold for a pixel to be deemed inside of a particle.
+
+###################################################################################################
+IMAGES
+###################################################################################################
+An image of the mask produced at each stage, an image of the final combined mask, an image of the
+particle mapping overlayed on the original microscope image, and a histogram of effective diameters
+are all produced and placed in the same folder as the JSONs.
