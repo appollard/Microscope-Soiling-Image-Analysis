@@ -1,0 +1,10 @@
+###################################################################################################
+This is modelled on Cody Anderson's Procedures A and C submitted to the Fraunhoefer Round-Robin.
+
+Notable deviations from his procedures include:
+
+Closing rings, filling holes and watershedding is performed after the masks are combined, rather
+than in the otsu stage. This is because particles that are separated by watershedding in the otsu
+are more often than not rejoined in the DoG. Moving this stage ensures that watershedding is
+applied to the full mask, not just one constituent mask, and likewise for ring closing and hole
+filling.
