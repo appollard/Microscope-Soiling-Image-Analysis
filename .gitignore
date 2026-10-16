@@ -7,6 +7,4 @@ Mahreen.py
 procedure_documentation/*
 *.pyc
 .venv/
-dist/
-build/
-*egg-info/
+private_presets.txt

@@ -131,17 +131,18 @@ class OtsuStage:
         # Convert to boolean mask
         self.IJ.run(img, "Convert to Mask", "")
 
+        #### MOVED TO COMBINED STAGE ####
         # Optionally run ring-closing
-        if self.args.close_particles:
-            self.IJ.run(img, "Close-", "")
+        # if self.args.close_particles:
+        #    self.IJ.run(img, "Close-", "")
 
         # Optionally run particle filling
-        if self.args.fill_particles:
-            self.IJ.run(img, "Fill Holes", "")
+        # if self.args.fill_particles:
+        #    self.IJ.run(img, "Fill Holes", "")
 
         # Optionally run watershedding
-        if self.args.de_agglomerate_particles:
-            self.IJ.run(img, "Watershed", "")
+        # if self.args.de_agglomerate_particles:
+        #   self.IJ.run(img, "Watershed", "")
 
         # Save mask image
         self.IJ.saveAs(img, "png", os.path.join(self.args.output_dir, "Otsu Mask"))
@@ -258,6 +259,20 @@ class CombinationStage:
         mask = masks[0]
         for m in masks[1:]:
             mask = ic.run("OR create", mask, m)
+
+        #### MOVED FROM OTSU STAGE ####
+        # Optionally run ring-closing
+        if self.args.close_particles:
+            self.IJ.run(mask, "Close-", "")
+
+        # Optionally run particle filling
+        if self.args.fill_particles:
+            self.IJ.run(mask, "Fill Holes", "")
+
+        # Optionally run watershedding
+        if self.args.de_agglomerate_particles:
+            self.IJ.run(mask, "Watershed", "")
+        #########
 
         # Clean up remaining images
         for item in masks:
