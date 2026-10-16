@@ -8,3 +8,5 @@ procedure_documentation/*
 *.pyc
 .venv/
 private_presets.txt
+verification.py
+test_colour_imgs/fake_microsope 2.tiff
