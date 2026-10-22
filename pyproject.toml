@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "microscope-image-particle-analysis"
+version = "0.1.0"
+description = "Particle and soiling analysis of microscope images using ImageJ/Fiji."
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [{ name = "Michael Cholette" }]
+requires-python = ">=3.10"
+dependencies = [
+    "matplotlib>=3.11.2",
+    "numpy>=2.5.3",
+    "Pillow>=12.3.0",
+    "pyimagej>=1.8.0",
+    "scyjava>=1.12.5",
+]
+
+[project.scripts]
+particle-analysis = "image_processing_procedures:main"
+
+[tool.setuptools]
+py-modules = ["image_processing_procedures", "utilities"]
