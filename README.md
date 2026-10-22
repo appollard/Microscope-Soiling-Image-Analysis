@@ -1,0 +1,107 @@
+# Microscope Image Particle Analysis
+
+## Instructions for Use
+
+The purpose of this is for you to be able to stick in an image or folder of images, and pull out
+some JSON files with soiling data, plus some pretty images for validation. See `presets.txt` for
+example CLI usages. See `image_processing_procedures.py` for a list of command line arguments, and
+see `utilities.py` for presets and more info on the CLI structure, and everything else.
+
+## Setup
+
+The image processing procedures use a command line interface. A series of arguments must be passed —
+see the comments at the top of `image_processing_procedures.py` for more information, including
+examples.
+
+One of the required arguments is the directory where you have installed `Fiji.app`. You
+must install Fiji so that you can access ImageJ since this process relies on running ImageJ using
+Java locally. This means you must also run Java.
+
+It may be possible to run things online using Maven and avoid a local Fiji install, but I couldn't
+get this working. Hence why I've made this all dependent on a Fiji install.
+
+I do not know if this works for Mac or Linux. It should work for Windows 11 as of September 2026.
+
+1. Install Java 11 (Azul Zulu 11.XX.XXX) from <https://www.azul.com/downloads/?package=jdk#zulu>.
+
+2. Extract it to somewhere permanent, e.g. `C:\Program Files\Zulu\zulu-11`.
+
+3. Make sure that you have the filepath `zulu-11\bin\java.exe`.
+
+4. Download Maven from <https://maven.apache.org/download.cgi>. I downloaded 3.9.X, now 3.10.X is
+   out. It shouldn't matter. This may be unnecessary.
+
+5. Extract it to somewhere permanent, e.g. `C:\Program Files\Apache\maven`.
+
+6. Make sure that you have the filepath `maven\bin\mvn.cmd`.
+
+7. Edit your system environment variables: *Edit the system environment variables → Environment
+   Variables → System variables*.
+   - Set `JAVA_HOME` to your Zulu directory from before. Using the same example as before it would
+     be `C:\Program Files\Zulu\zulu-11`.
+   - Set `MAVEN_HOME` to your Maven directory from before. Using the same example as before, it
+     would be `C:\Program Files\Apache\maven`.
+
+8. Add these to `Path`: `%JAVA_HOME%\bin`, `%MAVEN_HOME%\bin`
+
+9. Check that that's all working by opening a terminal and running `java -version`. You should get
+   11.X.X. Then run `mvn -version`. It should also say that you're using Java 11.
+
+10. Download and install Fiji from <https://imagej.net/software/fiji/downloads>. Version shouldn't
+    matter, just whatever's Windows 64 bit.
+
+11. Make sure that the path `Fiji.app\ImageJ-win64.exe` exists. Write down the path to get there,
+    e.g. `C:\Users\Me\Fiji.app`. **This is vital.**
+
+12. Make sure that your venv has all of the required modules installed, including `pyimagej`. If you
+    get an error like `jar tool not found at ...cjdk\cache...jre...bin\jar.exe` it's caused by the
+    `pyimagej` install also installing its own Java runtime instead of using the one we installed.
+    Stick this in the terminal to fix it:
+
+    ```powershell
+    $env:JAVA_HOME = "C:\Program Files\Zulu\zulu-11"
+    ```
+
+## Outputs
+
+The outputs of this process are three JSON files — one with information about each particle, one with
+whole-of-image soiling information, and one with masking thresholds. Intermediary images are also
+produced.
+
+### Particle information JSON
+
+Contains the following data for every particle identified:
+
+| Field | Description |
+| --- | --- |
+| `label` | A unique identifier for each particle, starting at 1 for the first particle in the list. |
+| `area_px` | The number of pixels that constitute the particle, as identified from the mask using 8-neighbour connectivity. |
+| `area_um2` | Directly proportional to the area in pixels — number of pixels multiplied by the square of the microns-per-pixel scale of the image. |
+| `effective_diameter_um2` | Directly proportional to the square root of the `area_um2` of the particle — converted using `A = pi*(d/2)**2`. |
+| `centroid_px` | Tuple `(row, col)` of the coordinate that the centroid of the particle is located at. |
+| `perimeter_px` | The approximate perimeter of the particle, measured as number of edges less `(2 - sqrt(2))` for each non-adjacent corner. See the [ImageJ docs](https://imagejdocu.list.lu/faq/technical/what_are_the_algorithms_used_to_calculate_particle_area_and_perimeter). |
+| `eccentricity` | Eccentricity of the ellipse that best represents the particle: `sqrt(1 - (min_ax/maj_ax)**2)`. |
+| `major_axis_length_um` | Major axis of the best-fitting ellipse. [Source code](https://github.com/imagej/ImageJ/blob/master/ij/process/EllipseFitter.java). |
+| `minor_axis_len_um` | Minor axis of the best-fitting ellipse. [Source code](https://github.com/imagej/ImageJ/blob/master/ij/process/EllipseFitter.java). |
+| `spheroid_volume_um3` | Volume of a spheroid calculated using the minor and major axes. |
+| `bbox_px` | Tuple `(min_row, min_col, max_row, max_col)` that bounds the particle. |
+
+### Whole-of-image soiling JSON
+
+| Field | Description |
+| --- | --- |
+| `soil_volume_um3` | Sum of the spheroid volume of each particle. |
+| `soil_area_um2` | Sum of the area of each particle. |
+| `soil_area_coverage_decimal` | Sum of the area of each particle over total canvas area. |
+| `soil_volume_um3_per_m2` | Soil volume divided by 1 square metre. |
+
+### Thresholds JSON
+
+Contains a list of lists of threshold values. Each list belongs to one mask and contains the upper
+and lower threshold for a pixel to be deemed inside of a particle.
+
+## Images
+
+An image of the mask produced at each stage, an image of the final combined mask, an image of the
+particle mapping overlaid on the original microscope image, and a histogram of effective diameters
+are all produced and placed in the same folder as the JSONs.
