@@ -149,10 +149,9 @@ def get_CLI_args():
 def get_args():
     """Obtain the command line arguments and handle presets
 
-    If no preset is specified, return args as returned by get_CLI_args(). If a preset is
-    specified, check each argument for whether its been manually set. If not, set it to the
-    value defined in the corresponding entry in PRESETS. This lets users choose a preset and
-    deviate from it where desired.
+    Start with the default arguments. If a preset is specified, update the arguments with the
+    preset. Then update the result with the CLI arguments. This enforces priority between different
+    argument sources.
     """
     args = get_CLI_args()
 
