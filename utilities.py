@@ -3,6 +3,8 @@ import json
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.widgets import Slider
+from matplotlib.figure import Figure
+from matplotlib.backends.backend_agg import FigureCanvasAgg
 from PIL import Image
 import os
 import argparse
@@ -108,7 +110,7 @@ def get_CLI_args():
     # Particle analysis
     parser.add_argument("--exclude-edges", action="store_true")
     parser.add_argument("--show-visualiser", action="store_true")
-    parser.add_argument("--give_diameters", action="store_true")
+    parser.add_argument("--give-diameters", action="store_true")
 
     return parser.parse_args()
 
@@ -181,9 +183,6 @@ def save_to_json(list_of_dicts, output_dir, name):
     Converts a list of dictionaries with numpy elements to native Python. Then saves the resulting
     dictionary to the specified output directory with the specified name.
     """
-
-    # Root directory where this script lives
-    Path(output_dir).mkdir(parents=True, exist_ok=True)
 
     # Full path to the output file
     output_path = Path(output_dir) / name
@@ -295,14 +294,14 @@ def soiling_info(particle_dicts, dimensions, um_per_px):
 
 def get_histogram(diameters, args):
 
-    plt.hist(diameters, bins=100)
-    plt.xlabel(r"Effective diameter ($\mu$m)")
-    plt.ylabel("Frequency")
-    plt.title("Histogram of Effective Particle Diameters")
-    plt.savefig(
-        os.path.join(args.output_dir, "Effective Diameters Histogram.png"), dpi=300
-    )
-    plt.close()
+    fig = Figure(figsize=(6, 4), dpi=200)
+    FigureCanvasAgg(fig)
+    ax = fig.add_subplot(1, 1, 1)
+    ax.hist(diameters, bins=100)
+    ax.set_xlabel(r"Effective diameter ($\mu$m)")
+    ax.set_ylabel("Frequency")
+    ax.set_title("Histogram of Effective Particle Diameters")
+    fig.savefig(os.path.join(args.output_dir, "Effective Diameters Histogram.png"))
 
 
 def colourful_particle_map(labels, alpha):
@@ -364,7 +363,7 @@ def show_overlay(microscope_img, labels, args):
 
     # Turn this into a picture to be saved to the output directory
     background = Image.fromarray(microscope_img)
-    particle_map = Image.fromarray(map, "RGBA")
+    particle_map = Image.fromarray(map)
     background = background.convert("RGB")
     background.paste(particle_map, (0, 0), mask=particle_map)
     background.save(os.path.join(args.output_dir, "Particle Map.png"))

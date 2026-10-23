@@ -406,6 +406,9 @@ def main():
 
     args = ut.get_args()
 
+    # Make sure the output directory exists
+    Path(args.output_dir).mkdir(parents=True, exist_ok=True)
+
     # Use the local installation
     scyjava.config.set_java_constraints(fetch="auto", vendor="zulu", version="21")
 
