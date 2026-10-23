@@ -22,40 +22,71 @@ IMAGE_SUFFIXES = {".bmp", ".jpg", ".jpeg", ".png", ".tif", ".tiff"}
 
 PRESETS = {
     "A": {
-        "scale": 1 / 3.156,
-        "background": "black",
+        "gamma": 0.9,
         "rolling_ball": True,
         "sliding": True,
+        "exclude_edges": True,
+        "scale": 1 / 3.156,
+        "background": "black",
         "rolling_radius": 50,
         "sigma1": 1,
         "sigma2": 2,
-        "gamma": 0.9,
         "DoG_mask": "Triangle",
-        "exclude_edges": True,
     },
     "C": {
-        "scale": 1 / 0.464,
+        "gamma": 1,
         "colour": True,
         "retinex": True,
+        "rolling_ball": True,
+        "presmoothing": True,
+        "sliding": True,
+        "close_particles": True,
+        "fill_particles": True,
+        "de_agglomerate_particles": True,
+        "high_precision_DoG": True,
+        "exclude_edges": True,
+        "scale": 1 / 0.464,
         "retinex_type": "Uniform",
         "retinex_scale": 240,
         "retinex_scale_division": 3,
         "retinex_dynamic": 2.12,
         "background": "white",
-        "rolling_ball": True,
-        "presmoothing": True,
-        "sliding": True,
         "rolling_radius": 50,
-        "close_particles": True,
-        "fill_particles": True,
-        "de_agglomerate_particles": True,
-        "high_precision_DoG": True,
         "sigma1": 1,
         "sigma2": 2,
-        "gamma": 1,
         "DoG_mask": "Default",
-        "exclude_edges": True,
     },
+}
+
+BASE_DEFAULTS = {
+    "procedure": None,
+    "output_dir": None,
+    "gamma": 1,
+    "colour": False,
+    "retinex": False,
+    "rolling_ball": False,
+    "presmoothing": False,
+    "sliding": False,
+    "close_particles": False,
+    "fill_particles": False,
+    "de_agglomerate_particles": False,
+    "high_precision_DoG": False,
+    "exclude_edges": False,
+    "show_visualiser": False,
+    "give_diameters": False,
+    "fiji_dir": None,
+    "input_file": None,
+    "input_dir": None,
+    "scale": None,
+    "retinex_type": None,
+    "retinex_scale": None,
+    "retinex_scale_division": None,
+    "retinex_dynamic": None,
+    "background": None,
+    "rolling_radius": None,
+    "sigma1": None,
+    "sigma2": None,
+    "DoG_mask": None,
 }
 
 
@@ -73,12 +104,12 @@ def get_CLI_args():
 
     #### RAW VARIABLES ####
     # Misc
-    parser.add_argument("--fiji-dir", type=str)
+    parser.add_argument("--fiji-dir", type=str, required=True)
 
     # Setup
-    parser.add_argument("--input-file")
-    parser.add_argument("--input-dir", type=str)
-    parser.add_argument("--output-dir", default="outputs")
+    parser.add_argument("--input-file", type=str)
+    parser.add_argument("--input-dir", type=str, required=True)
+    parser.add_argument("--output-dir", type=str, required=True)
     parser.add_argument("--scale", type=float)
 
     # Preprocessing
@@ -104,7 +135,7 @@ def get_CLI_args():
     parser.add_argument("--high-precision-DoG", action="store_true")
     parser.add_argument("--sigma1", type=float)
     parser.add_argument("--sigma2", type=float)
-    parser.add_argument("--gamma", type=float, default=1)
+    parser.add_argument("--gamma", type=float)
     parser.add_argument("--DoG-mask", choices=["Triangle", "Default"])
 
     # Particle analysis
@@ -125,13 +156,14 @@ def get_args():
     """
     args = get_CLI_args()
 
-    if args.procedure:
-        config = PRESETS[args.procedure]
+    preset = PRESETS.get(
+        args.procedure, {}
+    )  # Extract the desired preset (default to empty dict)
 
-        for key, value in config.items():
-            current = getattr(args, key)
-            if current is None or current is False:
-                setattr(args, key, value)
+    for key, default_value in BASE_DEFAULTS.items():  # Itterate through the defaults
+        arg_value = getattr(args, key)
+        if arg_value is None or arg_value is False:
+            setattr(args, key, preset.get(key, default_value))
 
     return args
 
