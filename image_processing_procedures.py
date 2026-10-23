@@ -400,11 +400,17 @@ class Visualisation:
 
 
 def main():
+
     import imagej
+    import scyjava
 
     args = ut.get_args()
 
+    # Use the local installation
+    scyjava.config.set_java_constraints(fetch="auto", vendor="zulu", version="21")
+
     ij = imagej.init(args.fiji_dir, mode="headless")
+
     IJ = jimport("ij.IJ")
 
     preprocessing = PreprocessingStage(IJ, args)

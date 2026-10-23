@@ -17,35 +17,25 @@ One of the required arguments is the directory where you have installed `Fiji.ap
 must install Fiji so that you can access ImageJ since this process relies on running ImageJ using
 Java locally. This means you must also run Java.
 
-It may be possible to run things online using Maven and avoid a local Fiji install, but I couldn't
-get this working. Hence why I've made this all dependent on a Fiji install.
+It is possible to run things online using Maven and avoid a local Fiji install, but this would limit future functionality.
 
 I do not know if this works for Mac or Linux. It should work for Windows 11 as of September 2026.
 
-1. Install Java 11 (Azul Zulu 11.XX.XXX) from <https://www.azul.com/downloads/?package=jdk#zulu>.
+1. Install Java 21 (Azul Zulu 21.XX.XXX) from <https://www.azul.com/downloads/?package=jdk#zulu>.
 
-2. Extract it to somewhere permanent, e.g. `C:\Program Files\Zulu\zulu-11`.
+2. Extract it to somewhere permanent, e.g. `C:\Program Files\Zulu\zulu-21`.
 
-3. Make sure that you have the filepath `zulu-11\bin\java.exe`.
-
-4. Download Maven from <https://maven.apache.org/download.cgi>. I downloaded 3.9.X, now 3.10.X is
-   out. It shouldn't matter. This may be unnecessary.
-
-5. Extract it to somewhere permanent, e.g. `C:\Program Files\Apache\maven`.
-
-6. Make sure that you have the filepath `maven\bin\mvn.cmd`.
+3. Make sure that you have the filepath `zulu-21\bin\java.exe`.
 
 7. Edit your system environment variables: *Edit the system environment variables → Environment
    Variables → System variables*.
    - Set `JAVA_HOME` to your Zulu directory from before. Using the same example as before it would
-     be `C:\Program Files\Zulu\zulu-11`.
-   - Set `MAVEN_HOME` to your Maven directory from before. Using the same example as before, it
-     would be `C:\Program Files\Apache\maven`.
+     be `C:\Program Files\Zulu\zulu-21`.
 
-8. Add these to `Path`: `%JAVA_HOME%\bin`, `%MAVEN_HOME%\bin`
+8. Add this toPATH in the system variables: `Path`: `%JAVA_HOME%\bin`
 
 9. Check that that's all working by opening a terminal and running `java -version`. You should get
-   11.X.X. Then run `mvn -version`. It should also say that you're using Java 11.
+   21.X.X.
 
 10. Download and install Fiji from <https://imagej.net/software/fiji/downloads>. Version shouldn't
     matter, just whatever's Windows 64 bit.
@@ -53,14 +43,7 @@ I do not know if this works for Mac or Linux. It should work for Windows 11 as o
 11. Make sure that the path `Fiji.app\ImageJ-win64.exe` exists. Write down the path to get there,
     e.g. `C:\Users\Me\Fiji.app`. **This is vital.**
 
-12. Make sure that your venv has all of the required modules installed, including `pyimagej`. If you
-    get an error like `jar tool not found at ...cjdk\cache...jre...bin\jar.exe` it's caused by the
-    `pyimagej` install also installing its own Java runtime instead of using the one we installed.
-    Stick this in the terminal to fix it:
-
-    ```powershell
-    $env:JAVA_HOME = "C:\Program Files\Zulu\zulu-11"
-    ```
+9. Make sure that your venv has all of the required modules installed, including `pyimagej`
 
 ## Outputs
 
