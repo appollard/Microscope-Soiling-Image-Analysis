@@ -84,8 +84,8 @@ BASE_DEFAULTS = {
     "retinex_dynamic": None,
     "background": None,
     "rolling_radius": None,
-    "sigma1": None,
-    "sigma2": None,
+    "sigma1": 1,
+    "sigma2": 2,
     "DoG_mask": None,
 }
 
@@ -97,7 +97,7 @@ def get_CLI_args():
 
     """
 
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(argument_default=argparse.SUPPRESS)
 
     #### PRESETS ####
     parser.add_argument("--procedure", choices=["A", "C"])
@@ -156,16 +156,24 @@ def get_args():
     """
     args = get_CLI_args()
 
-    preset = PRESETS.get(
-        args.procedure, {}
-    )  # Extract the desired preset (default to empty dict)
+    preset = (
+        PRESETS.get(args.procedure, None) if hasattr(args, "procedure") else None
+    )  # Extract the desired preset (default to None)
 
-    for key, default_value in BASE_DEFAULTS.items():  # Itterate through the defaults
-        arg_value = getattr(args, key)
-        if arg_value is None or arg_value is False:
-            setattr(args, key, preset.get(key, default_value))
+    # Start with the defaults
+    final = dict(BASE_DEFAULTS)
 
-    return args
+    # Update with the preset
+    if preset is not None:
+        final.update(preset)
+
+    # Update with user arguments
+    final.update(vars(args))
+
+    # Convert to namespace
+    final = argparse.Namespace(**final)
+
+    return final
 
 
 def get_files(dir):
@@ -379,7 +387,6 @@ def colourful_particle_map(labels, alpha):
     return map
 
 
-###################################################################################################
 def show_overlay(microscope_img, labels, args):
     """Generate an interactive overlay of the particle map over an image.
 
